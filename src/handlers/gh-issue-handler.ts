@@ -9,14 +9,14 @@ interface GhIssueEvent {
 
 export async function handleGhIssue(
   handler: BotHandler,
-  event: GhIssueEvent,
+  event: GhIssueEvent
 ): Promise<void> {
   const { channelId, args } = event;
 
   if (args.length < 2) {
     await handler.sendMessage(
       channelId,
-      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`",
+      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`"
     );
     return;
   }

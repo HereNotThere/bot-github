@@ -29,7 +29,7 @@ describe("gh_issue handler - Integration", () => {
       console.error("GITHUB_TOKEN set:", !!process.env.GITHUB_TOKEN);
       console.error(
         "GITHUB_TOKEN length:",
-        process.env.GITHUB_TOKEN?.length || 0,
+        process.env.GITHUB_TOKEN?.length || 0
       );
     }
 

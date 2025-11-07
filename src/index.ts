@@ -10,7 +10,7 @@ const bot = await makeTownsBot(
   process.env.JWT_SECRET!,
   {
     commands,
-  },
+  }
 );
 
 // ============================================================================
@@ -38,7 +38,7 @@ async function githubFetch(path: string) {
 
   if (!response.ok) {
     throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
+      `GitHub API error: ${response.status} ${response.statusText}`
     );
   }
 
@@ -239,7 +239,7 @@ bot.onSlashCommand("help", async (handler, { channelId }) => {
       "• `/gh_issue owner/repo #123` - Show issue details\n\n" +
       "**Other Commands:**\n" +
       "• `/help` - Show this help message\n" +
-      "• `/time` - Get the current time",
+      "• `/time` - Get the current time"
   );
 });
 
@@ -258,7 +258,7 @@ bot.onSlashCommand("github", async (handler, event) => {
       "**Usage:**\n" +
         "• `/github subscribe owner/repo`\n" +
         "• `/github unsubscribe`\n" +
-        "• `/github status`",
+        "• `/github status`"
     );
     return;
   }
@@ -268,7 +268,7 @@ bot.onSlashCommand("github", async (handler, event) => {
       if (!repo) {
         await handler.sendMessage(
           channelId,
-          "❌ Usage: `/github subscribe owner/repo`",
+          "❌ Usage: `/github subscribe owner/repo`"
         );
         return;
       }
@@ -277,7 +277,7 @@ bot.onSlashCommand("github", async (handler, event) => {
       if (!repo.includes("/") || repo.split("/").length !== 2) {
         await handler.sendMessage(
           channelId,
-          "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)",
+          "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)"
         );
         return;
       }
@@ -287,7 +287,7 @@ bot.onSlashCommand("github", async (handler, event) => {
       if (!isValid) {
         await handler.sendMessage(
           channelId,
-          `❌ Repository **${repo}** not found or is not public`,
+          `❌ Repository **${repo}** not found or is not public`
         );
         return;
       }
@@ -313,7 +313,7 @@ bot.onSlashCommand("github", async (handler, event) => {
           `4. Secret: (set GITHUB_WEBHOOK_SECRET in your bot)\n` +
           `5. Events: Choose individual events or "Send me everything"\n` +
           `6. Click "Add webhook"\n\n` +
-          `_Note: You need write access to the repository to add webhooks._`,
+          `_Note: You need write access to the repository to add webhooks._`
       );
       break;
     }
@@ -323,7 +323,7 @@ bot.onSlashCommand("github", async (handler, event) => {
       if (!repos || repos.size === 0) {
         await handler.sendMessage(
           channelId,
-          "❌ This channel has no subscriptions",
+          "❌ This channel has no subscriptions"
         );
         return;
       }
@@ -344,7 +344,7 @@ bot.onSlashCommand("github", async (handler, event) => {
 
       await handler.sendMessage(
         channelId,
-        "✅ Unsubscribed from all repositories",
+        "✅ Unsubscribed from all repositories"
       );
       break;
     }
@@ -354,18 +354,18 @@ bot.onSlashCommand("github", async (handler, event) => {
       if (!repos || repos.size === 0) {
         await handler.sendMessage(
           channelId,
-          "📭 **No subscriptions**\n\nUse `/github subscribe owner/repo` to get started",
+          "📭 **No subscriptions**\n\nUse `/github subscribe owner/repo` to get started"
         );
         return;
       }
 
       const repoList = Array.from(repos)
-        .map((r) => `• ${r}`)
+        .map(r => `• ${r}`)
         .join("\n");
 
       await handler.sendMessage(
         channelId,
-        `📬 **Subscribed Repositories:**\n\n${repoList}`,
+        `📬 **Subscribed Repositories:**\n\n${repoList}`
       );
       break;
     }
@@ -377,7 +377,7 @@ bot.onSlashCommand("github", async (handler, event) => {
           "**Available actions:**\n" +
           "• `subscribe`\n" +
           "• `unsubscribe`\n" +
-          "• `status`",
+          "• `status`"
       );
   }
 });
@@ -388,7 +388,7 @@ bot.onSlashCommand("gh_pr", async (handler, event) => {
   if (args.length < 2) {
     await handler.sendMessage(
       channelId,
-      "❌ Usage: `/gh_pr owner/repo #123` or `/gh_pr owner/repo 123`",
+      "❌ Usage: `/gh_pr owner/repo #123` or `/gh_pr owner/repo 123`"
     );
     return;
   }
@@ -434,7 +434,7 @@ bot.onMessage(async (handler, { message, channelId }) => {
       try {
         const endpoint = type === "pull" ? "pulls" : "issues";
         const data = await githubFetch(
-          `/repos/${owner}/${repo}/${endpoint}/${number}`,
+          `/repos/${owner}/${repo}/${endpoint}/${number}`
         );
 
         const unfurled =
@@ -462,7 +462,7 @@ app.use(logger());
 app.post("/webhook", jwtMiddleware, handler);
 
 // GitHub webhook endpoint
-app.post("/github-webhook", async (c) => {
+app.post("/github-webhook", async c => {
   const signature = c.req.header("X-Hub-Signature-256");
   const event = c.req.header("X-GitHub-Event");
   const body = await c.req.text();
@@ -533,7 +533,7 @@ app.post("/github-webhook", async (c) => {
 });
 
 // Health check endpoint
-app.get("/health", (c) => {
+app.get("/health", c => {
   return c.json({
     status: "ok",
     subscriptions: channelToRepos.size,

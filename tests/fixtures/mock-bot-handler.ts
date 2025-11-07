@@ -2,9 +2,7 @@ import type { BotHandler } from "@towns-protocol/bot";
 import { mock } from "bun:test";
 
 export function createMockBotHandler(): BotHandler {
-  const sendMessage = mock(() =>
-    Promise.resolve({ eventId: "test-event-id" }),
-  );
+  const sendMessage = mock(() => Promise.resolve({ eventId: "test-event-id" }));
   const editMessage = mock(() => Promise.resolve(undefined));
   const sendReaction = mock(() => Promise.resolve(undefined));
   const removeEvent = mock(() => Promise.resolve(undefined));

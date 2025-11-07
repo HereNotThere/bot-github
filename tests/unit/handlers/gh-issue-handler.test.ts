@@ -25,7 +25,7 @@ describe("gh_issue handler", () => {
     expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
     expect(mockHandler.sendMessage).toHaveBeenCalledWith(
       "test-channel",
-      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`",
+      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`"
     );
   });
 
@@ -38,13 +38,13 @@ describe("gh_issue handler", () => {
     expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
     expect(mockHandler.sendMessage).toHaveBeenCalledWith(
       "test-channel",
-      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`",
+      "❌ Usage: `/gh_issue owner/repo #123` or `/gh_issue owner/repo 123`"
     );
   });
 
   test("should fetch and display issue details with # prefix", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -70,7 +70,7 @@ describe("gh_issue handler", () => {
 
   test("should fetch and display issue details without # prefix", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -86,7 +86,7 @@ describe("gh_issue handler", () => {
 
   test("should display closed status for closed issues", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockClosedIssueResponse,
+      mockClosedIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -102,7 +102,7 @@ describe("gh_issue handler", () => {
 
   test("should omit labels line when no labels exist", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueWithoutLabelsResponse,
+      mockIssueWithoutLabelsResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -119,7 +119,7 @@ describe("gh_issue handler", () => {
   test("should handle GitHub API errors", async () => {
     const error = new Error("GitHub API error: 404 Not Found");
     const getIssueSpy = spyOn(githubClient, "getIssue").mockRejectedValue(
-      error,
+      error
     );
 
     await handleGhIssue(mockHandler, {
@@ -129,7 +129,7 @@ describe("gh_issue handler", () => {
 
     expect(mockHandler.sendMessage).toHaveBeenCalledWith(
       "test-channel",
-      "❌ Error: GitHub API error: 404 Not Found",
+      "❌ Error: GitHub API error: 404 Not Found"
     );
 
     getIssueSpy.mockRestore();
@@ -138,7 +138,7 @@ describe("gh_issue handler", () => {
   test("should handle malformed repository names", async () => {
     const error = new Error("GitHub API error: 400 Bad Request");
     const getIssueSpy = spyOn(githubClient, "getIssue").mockRejectedValue(
-      error,
+      error
     );
 
     await handleGhIssue(mockHandler, {
@@ -148,7 +148,7 @@ describe("gh_issue handler", () => {
 
     expect(mockHandler.sendMessage).toHaveBeenCalledWith(
       "test-channel",
-      "❌ Error: GitHub API error: 400 Bad Request",
+      "❌ Error: GitHub API error: 400 Bad Request"
     );
 
     getIssueSpy.mockRestore();
@@ -164,7 +164,7 @@ describe("gh_issue handler", () => {
       ],
     };
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      multiLabelIssue,
+      multiLabelIssue
     );
 
     await handleGhIssue(mockHandler, {
@@ -180,7 +180,7 @@ describe("gh_issue handler", () => {
 
   test("should strip markdown bold formatting from repo name", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -195,7 +195,7 @@ describe("gh_issue handler", () => {
 
   test("should strip markdown italic formatting from issue number", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -210,7 +210,7 @@ describe("gh_issue handler", () => {
 
   test("should strip markdown code formatting from arguments", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -225,7 +225,7 @@ describe("gh_issue handler", () => {
 
   test("should strip multiple markdown formats from arguments", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
@@ -240,7 +240,7 @@ describe("gh_issue handler", () => {
 
   test("should preserve underscores in repo names", async () => {
     const getIssueSpy = spyOn(githubClient, "getIssue").mockResolvedValue(
-      mockIssueResponse,
+      mockIssueResponse
     );
 
     await handleGhIssue(mockHandler, {
