@@ -7,6 +7,8 @@
     "build": "tsc --noEmit",
     "clean": "rm -rf dist",
     "dev": "bun run --watch src/index.ts",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
     "lint": "eslint --format unix ./src  --max-warnings=0",
     "lint:fix": "eslint --format unix ./src  --max-warnings=0 --fix",
     "start": "bun run src/index.ts",

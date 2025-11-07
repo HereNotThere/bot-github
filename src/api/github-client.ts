@@ -16,7 +16,7 @@ export async function githubFetch(path: string): Promise<any> {
 
   if (!response.ok) {
     throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
+      `GitHub API error: ${response.status} ${response.statusText}`
     );
   }
 
@@ -34,14 +34,14 @@ export async function validateRepo(repo: string): Promise<boolean> {
 
 export async function getIssue(
   repo: string,
-  issueNumber: string,
+  issueNumber: string
 ): Promise<GitHubIssue> {
   return githubFetch(`/repos/${repo}/issues/${issueNumber}`);
 }
 
 export async function getPullRequest(
   repo: string,
-  prNumber: string,
+  prNumber: string
 ): Promise<GitHubPullRequest> {
   return githubFetch(`/repos/${repo}/pulls/${prNumber}`);
 }
