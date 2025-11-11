@@ -168,3 +168,64 @@ export async function listIssues(
 
   return actualIssues.slice(0, count);
 }
+
+/**
+ * GitHub Event type from /repos/\{owner\}/\{repo\}/events API
+ */
+export interface GitHubEvent {
+  id: string;
+  type: string;
+  actor: {
+    login: string;
+    avatar_url: string;
+  };
+  repo: {
+    name: string;
+  };
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+/**
+ * Fetch recent events for a repository with ETag support
+ * Returns `\{ events, etag \}` or `\{ notModified: true \}` if ETag matches
+ */
+export async function fetchRepoEvents(
+  repo: string,
+  etag?: string
+): Promise<
+  | { events: GitHubEvent[]; etag: string; notModified?: false }
+  | { notModified: true; etag?: never; events?: never }
+> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.v3+json",
+  };
+
+  if (GITHUB_TOKEN) {
+    headers.Authorization = `token ${GITHUB_TOKEN}`;
+  }
+
+  if (etag) {
+    headers["If-None-Match"] = etag;
+  }
+
+  const response = await fetch(`${GITHUB_API}/repos/${repo}/events`, {
+    headers,
+  });
+
+  // 304 Not Modified - no changes since last poll
+  if (response.status === 304) {
+    return { notModified: true };
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `GitHub API error: ${response.status} ${response.statusText}`
+    );
+  }
+
+  const events = (await response.json()) as GitHubEvent[];
+  const newEtag = response.headers.get("ETag") || "";
+
+  return { events, etag: newEtag };
+}

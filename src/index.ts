@@ -2,28 +2,11 @@ import { makeTownsBot } from "@towns-protocol/bot";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import commands from "./commands";
-import crypto from "node:crypto";
 import { handleGhIssue } from "./handlers/gh-issue-handler";
 import { handleGhPr } from "./handlers/gh-pr-handler";
 import { handleGithubSubscription } from "./handlers/github-subscription-handler";
-import {
-  formatPullRequest,
-  formatIssue,
-  formatPush,
-  formatRelease,
-  formatWorkflowRun,
-  formatIssueComment,
-  formatPullRequestReview,
-} from "./formatters/github-events";
-import type {
-  PullRequestEvent,
-  IssuesEvent,
-  PushEvent,
-  ReleaseEvent,
-  WorkflowRunEvent,
-  IssueCommentEvent,
-  PullRequestReviewEvent,
-} from "@octokit/webhooks-types";
+import { pollingService } from "./services/polling-service";
+import { dbService } from "./db";
 
 const bot = await makeTownsBot(
   process.env.APP_PRIVATE_DATA!,
@@ -34,13 +17,6 @@ const bot = await makeTownsBot(
 );
 
 // ============================================================================
-// STORAGE - In-memory maps (use SQLite for production)
-// ============================================================================
-
-const channelToRepos = new Map<string, Set<string>>(); // channelId -> Set of "owner/repo"
-const repoToChannels = new Map<string, Set<string>>(); // "owner/repo" -> Set of channelIds
-
-// ============================================================================
 // SLASH COMMAND HANDLERS
 // ============================================================================
 
@@ -49,7 +25,7 @@ bot.onSlashCommand("help", async (handler, { channelId }) => {
     channelId,
     "**GitHub Bot for Towns**\n\n" +
       "**Subscription Commands:**\n" +
-      "• `/github subscribe owner/repo` - Subscribe to GitHub events\n" +
+      "• `/github subscribe owner/repo` - Subscribe to GitHub events (checked every 5 min)\n" +
       "• `/github unsubscribe owner/repo` - Unsubscribe from a repository\n" +
       "• `/github status` - Show current subscriptions\n\n" +
       "**Query Commands:**\n" +
@@ -64,10 +40,7 @@ bot.onSlashCommand("help", async (handler, { channelId }) => {
 });
 
 bot.onSlashCommand("github", async (handler, event) => {
-  await handleGithubSubscription(handler, event, {
-    channelToRepos,
-    repoToChannels,
-  });
+  await handleGithubSubscription(handler, event);
 });
 
 bot.onSlashCommand("gh_pr", handleGhPr);
@@ -86,89 +59,28 @@ app.use(logger());
 // Towns webhook endpoint
 app.post("/webhook", jwtMiddleware, handler);
 
-// GitHub webhook endpoint
-app.post("/github-webhook", async c => {
-  const signature = c.req.header("X-Hub-Signature-256");
-  const event = c.req.header("X-GitHub-Event");
-  const body = await c.req.text();
-
-  // Verify webhook signature if secret is configured
-  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
-  if (webhookSecret && signature) {
-    const hmac = crypto.createHmac("sha256", webhookSecret);
-    hmac.update(body);
-    const digest = `sha256=${hmac.digest("hex")}`;
-
-    if (signature !== digest) {
-      return c.json({ error: "Invalid signature" }, 401);
-    }
-  }
-
-  const payload = JSON.parse(body) as {
-    repository?: { full_name: string };
-    [key: string]: unknown;
-  };
-  const repo = payload.repository?.full_name;
-
-  if (!repo) {
-    return c.json({ ok: true, message: "no repository in payload" });
-  }
-
-  // Find subscribed channels
-  const channels = repoToChannels.get(repo);
-  if (!channels || channels.size === 0) {
-    return c.json({ ok: true, message: "no subscriptions for this repo" });
-  }
-
-  // Format message based on event type
-  let message = "";
-  switch (event) {
-    case "pull_request":
-      message = formatPullRequest(payload as unknown as PullRequestEvent);
-      break;
-    case "issues":
-      message = formatIssue(payload as unknown as IssuesEvent);
-      break;
-    case "push":
-      message = formatPush(payload as unknown as PushEvent);
-      break;
-    case "release":
-      message = formatRelease(payload as unknown as ReleaseEvent);
-      break;
-    case "workflow_run":
-      message = formatWorkflowRun(payload as unknown as WorkflowRunEvent);
-      break;
-    case "issue_comment":
-      message = formatIssueComment(payload as unknown as IssueCommentEvent);
-      break;
-    case "pull_request_review":
-      message = formatPullRequestReview(
-        payload as unknown as PullRequestReviewEvent
-      );
-      break;
-  }
-
-  // Send to all subscribed channels
-  if (message) {
-    for (const channelId of channels) {
-      try {
-        await bot.sendMessage(channelId, message);
-      } catch (error) {
-        console.error(`Failed to send to channel ${channelId}:`, error);
-      }
-    }
-  }
-
-  return c.json({ ok: true, event, repo, channels: channels.size });
-});
-
 // Health check endpoint
-app.get("/health", c => {
+app.get("/health", async c => {
+  const repos = await dbService.getAllSubscribedRepos();
   return c.json({
     status: "ok",
-    subscriptions: channelToRepos.size,
-    repos: repoToChannels.size,
+    subscribed_repos: repos.length,
+    polling_active: true,
   });
 });
+
+// ============================================================================
+// START POLLING SERVICE
+// ============================================================================
+
+// Set the function used to send messages to Towns channels
+pollingService.setSendMessageFunction(async (channelId, message) => {
+  await bot.sendMessage(channelId, message);
+});
+
+// Start polling for GitHub events
+pollingService.start();
+
+console.log("✅ GitHub polling service started (5 minute intervals)");
 
 export default app;
