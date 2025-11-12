@@ -171,20 +171,10 @@ export async function listIssues(
 
 /**
  * GitHub Event type from /repos/\{owner\}/\{repo\}/events API
+ * Uses Octokit's official type for the base structure
  */
-export interface GitHubEvent {
-  id: string;
-  type: string;
-  actor: {
-    login: string;
-    avatar_url: string;
-  };
-  repo: {
-    name: string;
-  };
-  payload: Record<string, unknown>;
-  created_at: string;
-}
+export type GitHubEventRaw =
+  Endpoints["GET /repos/{owner}/{repo}/events"]["response"]["data"][number];
 
 /**
  * Fetch recent events for a repository with ETag support
@@ -194,7 +184,7 @@ export async function fetchRepoEvents(
   repo: string,
   etag?: string
 ): Promise<
-  | { events: GitHubEvent[]; etag: string; notModified?: false }
+  | { events: GitHubEventRaw[]; etag: string; notModified?: false }
   | { notModified: true; etag?: never; events?: never }
 > {
   const { owner, repo: repoName } = parseRepo(repo);
@@ -207,7 +197,7 @@ export async function fetchRepoEvents(
       headers: etag ? { "If-None-Match": etag } : {},
     });
 
-    const events = response.data as GitHubEvent[];
+    const events = response.data;
     const newEtag = response.headers.etag || "";
 
     return { events, etag: newEtag };

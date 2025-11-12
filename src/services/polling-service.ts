@@ -1,4 +1,4 @@
-import type { GitHubEvent as GitHubEventRaw } from "../api/github-client";
+import type { GitHubEventRaw } from "../api/github-client";
 import { fetchRepoEvents } from "../api/github-client";
 import { dbService } from "../db";
 import type { GitHubEvent } from "../types/github-events-api";

@@ -1,22 +1,19 @@
 /**
  * Type definitions for GitHub Events API
+ * Extends Octokit's official types with discriminated payload unions
  * https://docs.github.com/en/rest/activity/events
  */
 
+import type { Endpoints } from "@octokit/types";
+
 /**
- * Base event structure from GitHub Events API
+ * Base event structure from Octokit's official types
+ * We use this as the foundation and only refine the payload types
  */
-interface BaseGitHubEvent {
-  id: string;
-  actor: {
-    login: string;
-    avatar_url: string;
-  };
-  repo: {
-    name: string;
-  };
-  created_at: string;
-}
+type OctokitEvent =
+  Endpoints["GET /repos/{owner}/{repo}/events"]["response"]["data"][number];
+
+type BaseGitHubEvent = Omit<OctokitEvent, "payload">;
 
 /**
  * Pull Request Event Payload
