@@ -1,21 +1,16 @@
 import type { BotHandler } from "@towns-protocol/bot";
 import { validateRepo } from "../api/github-client";
 import { stripMarkdown } from "../utils/stripper";
+import { dbService } from "../db";
 
 interface GithubSubscriptionEvent {
   channelId: string;
   args: string[];
 }
 
-export interface SubscriptionStorage {
-  channelToRepos: Map<string, Set<string>>;
-  repoToChannels: Map<string, Set<string>>;
-}
-
 export async function handleGithubSubscription(
   handler: BotHandler,
-  event: GithubSubscriptionEvent,
-  storage: SubscriptionStorage
+  event: GithubSubscriptionEvent
 ): Promise<void> {
   const { channelId, args } = event;
   const [action, repoArg] = args;
@@ -24,9 +19,9 @@ export async function handleGithubSubscription(
     await handler.sendMessage(
       channelId,
       "**Usage:**\n" +
-        "• `/github subscribe owner/repo`\n" +
-        "• `/github unsubscribe owner/repo`\n" +
-        "• `/github status`"
+        "• `/github subscribe owner/repo` - Subscribe to GitHub events\n" +
+        "• `/github unsubscribe owner/repo` - Unsubscribe from a repository\n" +
+        "• `/github status` - Show current subscriptions"
     );
     return;
   }
@@ -53,6 +48,16 @@ export async function handleGithubSubscription(
         return;
       }
 
+      // Check if already subscribed
+      const isAlreadySubscribed = await dbService.isSubscribed(channelId, repo);
+      if (isAlreadySubscribed) {
+        await handler.sendMessage(
+          channelId,
+          `ℹ️ Already subscribed to **${repo}**`
+        );
+        return;
+      }
+
       // Validate repo exists
       const isValid = await validateRepo(repo);
       if (!isValid) {
@@ -63,23 +68,21 @@ export async function handleGithubSubscription(
         return;
       }
 
-      // Store subscription
-      if (!storage.channelToRepos.has(channelId)) {
-        storage.channelToRepos.set(channelId, new Set());
-      }
-      storage.channelToRepos.get(channelId)!.add(repo);
-
-      if (!storage.repoToChannels.has(repo)) {
-        storage.repoToChannels.set(repo, new Set());
-      }
-      storage.repoToChannels.get(repo)!.add(channelId);
+      // Store subscription in database
+      await dbService.subscribe(channelId, repo);
 
       await handler.sendMessage(
         channelId,
-        `✅ **Subscription registered for ${repo}**\n\n` +
-          `⚠️ **Feature Incomplete**\n` +
-          `Automatic webhook creation requires GitHub App or OAuth integration. This feature currently only stores your subscription preference.\n\n` +
-          `💡 **Want automatic subscriptions?** Tip to fund GitHub App development! 🤑`
+        `✅ **Subscribed to ${repo}**\n\n` +
+          `📡 You'll receive notifications for:\n` +
+          `• Pull requests\n` +
+          `• Issues\n` +
+          `• Commits\n` +
+          `• Releases\n` +
+          `• CI/CD runs\n` +
+          `• Comments\n\n` +
+          `⏱️ Events are checked every 5 minutes.\n` +
+          `🔗 ${`https://github.com/${repo}`}`
       );
       break;
     }
@@ -106,8 +109,8 @@ export async function handleGithubSubscription(
       }
 
       // Check if channel has any subscriptions
-      const channelRepos = storage.channelToRepos.get(channelId);
-      if (!channelRepos || channelRepos.size === 0) {
+      const channelRepos = await dbService.getChannelSubscriptions(channelId);
+      if (channelRepos.length === 0) {
         await handler.sendMessage(
           channelId,
           "❌ This channel has no subscriptions"
@@ -116,7 +119,7 @@ export async function handleGithubSubscription(
       }
 
       // Check if subscribed to this specific repo
-      if (!channelRepos.has(repo)) {
+      if (!channelRepos.includes(repo)) {
         await handler.sendMessage(
           channelId,
           `❌ Not subscribed to **${repo}**\n\nUse \`/github status\` to see your subscriptions`
@@ -124,28 +127,26 @@ export async function handleGithubSubscription(
         return;
       }
 
-      // Remove from channelToRepos
-      channelRepos.delete(repo);
-      if (channelRepos.size === 0) {
-        storage.channelToRepos.delete(channelId);
-      }
+      // Remove subscription
+      const success = await dbService.unsubscribe(channelId, repo);
 
-      // Remove from repoToChannels
-      const repoChannels = storage.repoToChannels.get(repo);
-      if (repoChannels) {
-        repoChannels.delete(channelId);
-        if (repoChannels.size === 0) {
-          storage.repoToChannels.delete(repo);
-        }
+      if (success) {
+        await handler.sendMessage(
+          channelId,
+          `✅ **Unsubscribed from ${repo}**`
+        );
+      } else {
+        await handler.sendMessage(
+          channelId,
+          `❌ Failed to unsubscribe from **${repo}**`
+        );
       }
-
-      await handler.sendMessage(channelId, `✅ **Unsubscribed from ${repo}**`);
       break;
     }
 
     case "status": {
-      const repos = storage.channelToRepos.get(channelId);
-      if (!repos || repos.size === 0) {
+      const repos = await dbService.getChannelSubscriptions(channelId);
+      if (repos.length === 0) {
         await handler.sendMessage(
           channelId,
           "📭 **No subscriptions**\n\nUse `/github subscribe owner/repo` to get started"
@@ -153,13 +154,12 @@ export async function handleGithubSubscription(
         return;
       }
 
-      const repoList = Array.from(repos)
-        .map(r => `• ${r}`)
-        .join("\n");
+      const repoList = repos.map(r => `• ${r}`).join("\n");
 
       await handler.sendMessage(
         channelId,
-        `📬 **Subscribed Repositories:**\n\n${repoList}`
+        `📬 **Subscribed Repositories (${repos.length}):**\n\n${repoList}\n\n` +
+          `⏱️ Checking for events every 5 minutes`
       );
       break;
     }

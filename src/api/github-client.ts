@@ -168,3 +168,44 @@ export async function listIssues(
 
   return actualIssues.slice(0, count);
 }
+
+/**
+ * GitHub Event type from /repos/\{owner\}/\{repo\}/events API
+ * Uses Octokit's official type for the base structure
+ */
+export type GitHubEventRaw =
+  Endpoints["GET /repos/{owner}/{repo}/events"]["response"]["data"][number];
+
+/**
+ * Fetch recent events for a repository with ETag support
+ * Returns `\{ events, etag \}` or `\{ notModified: true \}` if ETag matches
+ */
+export async function fetchRepoEvents(
+  repo: string,
+  etag?: string
+): Promise<
+  | { events: GitHubEventRaw[]; etag: string; notModified?: false }
+  | { notModified: true; etag?: never; events?: never }
+> {
+  const { owner, repo: repoName } = parseRepo(repo);
+
+  try {
+    // Use Octokit's request method to support ETag headers
+    const response = await octokit.request("GET /repos/{owner}/{repo}/events", {
+      owner,
+      repo: repoName,
+      headers: etag ? { "If-None-Match": etag } : {},
+    });
+
+    const events = response.data;
+    const newEtag = response.headers.etag || "";
+
+    return { events, etag: newEtag };
+  } catch (error: any) {
+    // 304 Not Modified - no changes since last poll
+    if (error.status === 304) {
+      return { notModified: true };
+    }
+    throw error;
+  }
+}
