@@ -68,7 +68,7 @@ export class DatabaseService {
           eq(subscriptions.repo, repo)
         )
       )
-      .run() as unknown as { changes: number; lastInsertRowid: number };
+      .run() as unknown as { changes: number; lastInsertRowid: number | bigint };
 
     return result.changes > 0;
   }
