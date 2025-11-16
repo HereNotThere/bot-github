@@ -8,6 +8,36 @@ interface GithubSubscriptionEvent {
   args: string[];
 }
 
+/**
+ * Parse event types from --events flag
+ * Returns default types if no flag, or comma-separated event types
+ */
+function parseEventTypes(args: string[]): string {
+  const defaultTypes = "pr,issues,commits,releases";
+  const eventsIndex = args.findIndex(arg => arg.startsWith("--events"));
+  if (eventsIndex === -1) return defaultTypes;
+
+  // Check for --events=pr,issues format
+  if (args[eventsIndex].includes("=")) {
+    return args[eventsIndex].split("=")[1] || defaultTypes;
+  }
+
+  // Check for --events pr,issues format (next arg)
+  if (eventsIndex + 1 < args.length) {
+    return args[eventsIndex + 1];
+  }
+
+  return defaultTypes;
+}
+
+/**
+ * Format event types for display
+ */
+function formatEventTypes(eventTypes: string): string {
+  if (eventTypes === "all") return "all events";
+  return eventTypes.split(",").map(t => t.trim()).join(", ");
+}
+
 export async function handleGithubSubscription(
   handler: BotHandler,
   event: GithubSubscriptionEvent
@@ -19,7 +49,7 @@ export async function handleGithubSubscription(
     await handler.sendMessage(
       channelId,
       "**Usage:**\n" +
-        "• `/github subscribe owner/repo` - Subscribe to GitHub events\n" +
+        "• `/github subscribe owner/repo [--events pr,issues,commits,releases,ci,comments,reviews]` - Subscribe to GitHub events\n" +
         "• `/github unsubscribe owner/repo` - Unsubscribe from a repository\n" +
         "• `/github status` - Show current subscriptions"
     );
@@ -31,7 +61,7 @@ export async function handleGithubSubscription(
       if (!repoArg) {
         await handler.sendMessage(
           channelId,
-          "❌ Usage: `/github subscribe owner/repo`"
+          "❌ Usage: `/github subscribe owner/repo [--events pr,issues,commits,releases,ci,comments,reviews]`"
         );
         return;
       }
@@ -47,6 +77,9 @@ export async function handleGithubSubscription(
         );
         return;
       }
+
+      // Parse event types from args
+      const eventTypes = parseEventTypes(args);
 
       // Check if already subscribed
       const isAlreadySubscribed = await dbService.isSubscribed(channelId, repo);
@@ -68,19 +101,14 @@ export async function handleGithubSubscription(
         return;
       }
 
-      // Store subscription in database
-      await dbService.subscribe(channelId, repo);
+      // Store subscription in database with event types
+      await dbService.subscribe(channelId, repo, eventTypes);
 
+      const eventTypeDisplay = formatEventTypes(eventTypes);
       await handler.sendMessage(
         channelId,
         `✅ **Subscribed to ${repo}**\n\n` +
-          `📡 You'll receive notifications for:\n` +
-          `• Pull requests\n` +
-          `• Issues\n` +
-          `• Commits\n` +
-          `• Releases\n` +
-          `• CI/CD runs\n` +
-          `• Comments\n\n` +
+          `📡 Event types: **${eventTypeDisplay}**\n\n` +
           `⏱️ Events are checked every 5 minutes.\n` +
           `🔗 ${`https://github.com/${repo}`}`
       );
@@ -119,7 +147,7 @@ export async function handleGithubSubscription(
       }
 
       // Check if subscribed to this specific repo
-      if (!channelRepos.includes(repo)) {
+      if (!channelRepos.some(sub => sub.repo === repo)) {
         await handler.sendMessage(
           channelId,
           `❌ Not subscribed to **${repo}**\n\nUse \`/github status\` to see your subscriptions`
@@ -145,8 +173,8 @@ export async function handleGithubSubscription(
     }
 
     case "status": {
-      const repos = await dbService.getChannelSubscriptions(channelId);
-      if (repos.length === 0) {
+      const subscriptions = await dbService.getChannelSubscriptions(channelId);
+      if (subscriptions.length === 0) {
         await handler.sendMessage(
           channelId,
           "📭 **No subscriptions**\n\nUse `/github subscribe owner/repo` to get started"
@@ -154,11 +182,13 @@ export async function handleGithubSubscription(
         return;
       }
 
-      const repoList = repos.map(r => `• ${r}`).join("\n");
+      const repoList = subscriptions
+        .map(sub => `• ${sub.repo} (${formatEventTypes(sub.eventTypes)})`)
+        .join("\n");
 
       await handler.sendMessage(
         channelId,
-        `📬 **Subscribed Repositories (${repos.length}):**\n\n${repoList}\n\n` +
+        `📬 **Subscribed Repositories (${subscriptions.length}):**\n\n${repoList}\n\n` +
           `⏱️ Checking for events every 5 minutes`
       );
       break;
