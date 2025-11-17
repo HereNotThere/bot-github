@@ -12,68 +12,68 @@ import type {
   IssueCommentEvent,
   PullRequestReviewEvent,
 } from "@octokit/webhooks-types";
+import { buildMessage } from "./shared";
 
 export function formatPullRequest(payload: PullRequestEvent): string {
   const { action, pull_request, repository } = payload;
 
+  let emoji: string;
+  let header: string;
+  let metadata: string[] | undefined;
+
   if (action === "opened") {
-    return (
-      `🔔 **Pull Request Opened**\n` +
-      `**${repository.full_name}** #${pull_request.number}\n\n` +
-      `**${pull_request.title}**\n` +
-      `👤 ${pull_request.user.login}\n` +
-      `📊 +${pull_request.additions || 0} -${pull_request.deletions || 0}\n` +
-      `🔗 ${pull_request.html_url}`
-    );
+    emoji = "🔔";
+    header = "Pull Request Opened";
+    metadata = [
+      `📊 +${pull_request.additions || 0} -${pull_request.deletions || 0}`,
+    ];
+  } else if (action === "closed" && pull_request.merged) {
+    emoji = "✅";
+    header = "Pull Request Merged";
+  } else if (action === "closed" && !pull_request.merged) {
+    emoji = "❌";
+    header = "Pull Request Closed";
+  } else {
+    return "";
   }
 
-  if (action === "closed" && pull_request.merged) {
-    return (
-      `✅ **Pull Request Merged**\n` +
-      `**${repository.full_name}** #${pull_request.number}\n\n` +
-      `**${pull_request.title}**\n` +
-      `👤 ${pull_request.user.login}\n` +
-      `🔗 ${pull_request.html_url}`
-    );
-  }
-
-  if (action === "closed" && !pull_request.merged) {
-    return (
-      `❌ **Pull Request Closed**\n` +
-      `**${repository.full_name}** #${pull_request.number}\n\n` +
-      `**${pull_request.title}**\n` +
-      `👤 ${pull_request.user.login}\n` +
-      `🔗 ${pull_request.html_url}`
-    );
-  }
-
-  return "";
+  return buildMessage({
+    emoji,
+    header,
+    repository: repository.full_name,
+    number: pull_request.number,
+    title: pull_request.title,
+    user: pull_request.user.login,
+    metadata,
+    url: pull_request.html_url,
+  });
 }
 
 export function formatIssue(payload: IssuesEvent): string {
   const { action, issue, repository } = payload;
 
+  let emoji: string;
+  let header: string;
+
   if (action === "opened") {
-    return (
-      `🐛 **Issue Opened**\n` +
-      `**${repository.full_name}** #${issue.number}\n\n` +
-      `**${issue.title}**\n` +
-      `👤 ${issue.user.login}\n` +
-      `🔗 ${issue.html_url}`
-    );
+    emoji = "🐛";
+    header = "Issue Opened";
+  } else if (action === "closed") {
+    emoji = "✅";
+    header = "Issue Closed";
+  } else {
+    return "";
   }
 
-  if (action === "closed") {
-    return (
-      `✅ **Issue Closed**\n` +
-      `**${repository.full_name}** #${issue.number}\n\n` +
-      `**${issue.title}**\n` +
-      `👤 ${issue.user.login}\n` +
-      `🔗 ${issue.html_url}`
-    );
-  }
-
-  return "";
+  return buildMessage({
+    emoji,
+    header,
+    repository: repository.full_name,
+    number: issue.number,
+    title: issue.title,
+    user: issue.user.login,
+    url: issue.html_url,
+  });
 }
 
 export function formatPush(payload: PushEvent): string {
