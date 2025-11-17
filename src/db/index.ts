@@ -100,7 +100,7 @@ export class DatabaseService {
     // Ensure eventTypes is never null (default to common event types)
     return results.map(r => ({
       repo: r.repo,
-      eventTypes: (r.eventTypes || "pr,issues,commits,releases") as string,
+      eventTypes: r.eventTypes || "pr,issues,commits,releases",
     }));
   }
 
@@ -121,7 +121,7 @@ export class DatabaseService {
     // Ensure eventTypes is never null (default to common event types)
     return results.map(r => ({
       channelId: r.channelId,
-      eventTypes: (r.eventTypes || "pr,issues,commits,releases") as string,
+      eventTypes: r.eventTypes || "pr,issues,commits,releases",
     }));
   }
 

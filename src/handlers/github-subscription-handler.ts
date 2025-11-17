@@ -9,25 +9,72 @@ interface GithubSubscriptionEvent {
 }
 
 /**
- * Parse event types from --events flag
- * Returns default types if no flag, or comma-separated event types
+ * Allowed GitHub event types for subscriptions
+ */
+const ALLOWED_EVENT_TYPES = [
+  "pr",
+  "issues",
+  "commits",
+  "releases",
+  "ci",
+  "comments",
+  "reviews",
+] as const;
+
+/**
+ * Parse and validate event types from --events flag
+ * Returns default types if no flag, or comma-separated validated event types
+ * @throws Error if any event type is invalid
  */
 function parseEventTypes(args: string[]): string {
   const defaultTypes = "pr,issues,commits,releases";
   const eventsIndex = args.findIndex(arg => arg.startsWith("--events"));
   if (eventsIndex === -1) return defaultTypes;
 
+  let rawEventTypes: string;
+
   // Check for --events=pr,issues format
   if (args[eventsIndex].includes("=")) {
-    return args[eventsIndex].split("=")[1] || defaultTypes;
+    rawEventTypes = args[eventsIndex].split("=")[1] || defaultTypes;
+  } else if (eventsIndex + 1 < args.length) {
+    // Check for --events pr,issues format (next arg)
+    rawEventTypes = args[eventsIndex + 1];
+  } else {
+    return defaultTypes;
   }
 
-  // Check for --events pr,issues format (next arg)
-  if (eventsIndex + 1 < args.length) {
-    return args[eventsIndex + 1];
+  // Parse and validate event types
+  const tokens = rawEventTypes
+    .split(",")
+    .map(token => token.trim().toLowerCase())
+    .filter(token => token.length > 0);
+
+  // Handle "all" as special case
+  if (tokens.includes("all")) {
+    return ALLOWED_EVENT_TYPES.join(",");
   }
 
-  return defaultTypes;
+  // Validate each token
+  const invalidTokens: string[] = [];
+  const allowedSet = new Set(ALLOWED_EVENT_TYPES);
+  for (const token of tokens) {
+    if (!allowedSet.has(token as (typeof ALLOWED_EVENT_TYPES)[number])) {
+      invalidTokens.push(token);
+    }
+  }
+
+  if (invalidTokens.length > 0) {
+    throw new Error(
+      `Invalid event type(s): ${invalidTokens
+        .map(t => `'${t}'`)
+        .join(", ")}\n\n` +
+        `Valid options: ${ALLOWED_EVENT_TYPES.join(", ")}, all`
+    );
+  }
+
+  // Remove duplicates using Set and return
+  const uniqueTokens = Array.from(new Set(tokens));
+  return uniqueTokens.join(",");
 }
 
 /**
@@ -35,7 +82,10 @@ function parseEventTypes(args: string[]): string {
  */
 function formatEventTypes(eventTypes: string): string {
   if (eventTypes === "all") return "all events";
-  return eventTypes.split(",").map(t => t.trim()).join(", ");
+  return eventTypes
+    .split(",")
+    .map(t => t.trim())
+    .join(", ");
 }
 
 export async function handleGithubSubscription(
@@ -78,8 +128,16 @@ export async function handleGithubSubscription(
         return;
       }
 
-      // Parse event types from args
-      const eventTypes = parseEventTypes(args);
+      // Parse and validate event types from args
+      let eventTypes: string;
+      try {
+        eventTypes = parseEventTypes(args);
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : "Invalid event types";
+        await handler.sendMessage(channelId, `❌ ${errorMessage}`);
+        return;
+      }
 
       // Check if already subscribed
       const isAlreadySubscribed = await dbService.isSubscribed(channelId, repo);

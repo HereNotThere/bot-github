@@ -21,17 +21,18 @@ const EVENT_TYPE_MAP: Record<string, string> = {
 
 /**
  * Check if an event matches the subscription's event type filter
- * @param eventType GitHub event type (e.g., "PullRequestEvent")
+ * @param eventType GitHub event type (e.g., "PullRequestEvent") or null
  * @param subscriptionTypes Comma-separated event types (e.g., "pr,issues") or "all" or null
  */
 function isEventTypeMatch(
-  eventType: string,
+  eventType: string | null,
   subscriptionTypes: string | null | undefined
 ): boolean {
-  // Treat null/undefined or "all" as subscribing to all event types (backward compatibility)
-  if (!subscriptionTypes || subscriptionTypes === "all") return true;
+  // Treat null event type or null/undefined/"all" subscription as match
+  if (!eventType || !subscriptionTypes || subscriptionTypes === "all")
+    return true;
 
-  const subscribedTypes = subscriptionTypes.split(",").map((t) => t.trim());
+  const subscribedTypes = subscriptionTypes.split(",").map(t => t.trim());
 
   // Check if the event type matches any of the subscribed short names
   for (const shortName of subscribedTypes) {
@@ -395,7 +396,7 @@ export class PollingService {
 
     if (newEvents.length > 0) {
       // Get all channels subscribed to this repo
-      const channels: Array<{ channelId: string; eventTypes: string }> =
+      const channels: Array<{ channelId: string; eventTypes: string | null }> =
         await dbService.getRepoSubscribers(repo);
 
       // Process events in chronological order (oldest first)
@@ -452,16 +453,9 @@ export class PollingService {
 
         if (message) {
           // Filter channels based on their event type preferences
-          const channelsForEvent = channels.filter((channel) => {
-            const types = channel.eventTypes;
-            // Treat null or "all" as subscribing to all event types
-            if (!types || types === "all") return true;
-            // Check if event type matches any subscribed types
-            return types
-              .split(",")
-              .map((t) => t.trim())
-              .some((shortName) => EVENT_TYPE_MAP[shortName] === event.type);
-          });
+          const channelsForEvent = channels.filter(channel =>
+            isEventTypeMatch(event.type, channel.eventTypes)
+          );
 
           if (channelsForEvent.length === 0) continue;
 
