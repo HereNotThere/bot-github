@@ -47,7 +47,7 @@ or auto-merge, the Events API often doesn't publish the close event, and push ev
 |-----------------|---------------------|---------------------|
 | PR merge events | ❌ Missing           | ✅ Complete          |
 | Commit data     | ❌ Empty             | ✅ Full details      |
-| Delivery        | ⚠️ Best effort      | ✅ Guaranteed        |
+| Delivery        | ⚠️ Best effort      | ✅ Best-effort with retries |
 | Latency         | ❌ 5-min polling     | ✅ Real-time         |
 | Setup           | ✅ Easy (PAT)        | ✅ One-click install |
 | Webhooks        | ❌ Manual per repo   | ✅ Automatic         |
@@ -92,7 +92,6 @@ import { Webhooks } from "@octokit/webhooks";
 export class GitHubApp {
   private app: App;
   private webhooks: Webhooks;
-  private installationTokens: Map<number, { token: string; expiresAt: Date }>;
 
   constructor() {
     this.app = new App({
@@ -108,25 +107,13 @@ export class GitHubApp {
       secret: process.env.GITHUB_WEBHOOK_SECRET!,
     });
 
-    this.installationTokens = new Map();
     this.registerWebhookHandlers();
   }
 
-  // Token management with caching
+  // Get installation-scoped Octokit instance
+  // Octokit internally handles JWT generation and installation token caching
   async getInstallationOctokit(installationId: number) {
-    const cached = this.installationTokens.get(installationId);
-    if (cached && cached.expiresAt > new Date()) {
-      return this.app.getInstallationOctokit(installationId);
-    }
-
-    const octokit = await this.app.getInstallationOctokit(installationId);
-    // Cache for 59 minutes (tokens expire in 60)
-    this.installationTokens.set(installationId, {
-      token: octokit.auth.token,
-      expiresAt: new Date(Date.now() + 59 * 60 * 1000),
-    });
-
-    return octokit;
+    return await this.app.getInstallationOctokit(installationId);
   }
 
   private registerWebhookHandlers() {
@@ -143,90 +130,57 @@ export class GitHubApp {
 }
 ```
 
-#### 1.2 Webhook Handler (`src/github-app/webhook-handler.ts`)
+#### 1.2 Webhook Processing with Idempotency (`src/github-app/webhook-processor.ts`)
 
 ```typescript
-import { createNodeMiddleware } from "@octokit/webhooks";
-import type { EmitterWebhookEvent } from "@octokit/webhooks";
+// Idempotency tracking to prevent duplicate processing
+export class WebhookProcessor {
+  private processedDeliveries: Set<string> = new Set();
 
-export class WebhookHandler {
-  // Signature verification and idempotency
-  async verifyAndProcess(request: Request): Promise<Response> {
-    const signature = request.headers.get("x-hub-signature-256");
-    const eventType = request.headers.get("x-github-event");
-    const deliveryId = request.headers.get("x-github-delivery");
-
-    // Check idempotency
-    if (await this.isProcessed(deliveryId)) {
-      return new Response("Already processed", { status: 200 });
-    }
-
-    // Verify signature
-    const body = await request.text();
-    if (!await this.verifySignature(body, signature)) {
-      return new Response("Invalid signature", { status: 401 });
-    }
-
-    // Process event
-    await this.processEvent(eventType, JSON.parse(body), deliveryId);
-    return new Response("OK", { status: 200 });
+  async isProcessed(deliveryId: string): Promise<boolean> {
+    // In production, check database instead of in-memory Set
+    return this.processedDeliveries.has(deliveryId);
   }
 
-  private async verifySignature(body: string, signature: string): Promise<boolean> {
-    // HMAC-SHA256 verification
-    const crypto = require("crypto");
-    const hmac = crypto.createHmac("sha256", process.env.GITHUB_WEBHOOK_SECRET);
-    const digest = "sha256=" + hmac.update(body).digest("hex");
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(digest));
+  async markProcessed(deliveryId: string): Promise<void> {
+    this.processedDeliveries.add(deliveryId);
+    // In production, store in webhook_deliveries table
   }
 }
 ```
 
-### 2. Authentication Logic
+### 2. Raw Body Requirements for Webhook Verification
 
-#### 2.1 JWT Generation and Token Exchange (`src/github-app/auth-manager.ts`)
+**IMPORTANT**: Webhook signature verification requires the **raw, unmodified request body**.
+
+When using `@octokit/webhooks` with Hono or Express, you must:
+1. Access the raw body buffer BEFORE any JSON parsing middleware
+2. Pass the raw body string to `webhooks.verifyAndReceive()`
+3. Never use parsed JSON for signature verification
 
 ```typescript
-import { createAppAuth } from "@octokit/auth-app";
-import { LRUCache } from "lru-cache";
+// Hono integration example showing raw body handling
+app.post("/github-webhook", async (c) => {
+  // Get raw body - CRITICAL for signature verification
+  const body = await c.req.text();
+  const signature = c.req.header("x-hub-signature-256");
+  const event = c.req.header("x-github-event");
+  const deliveryId = c.req.header("x-github-delivery");
 
-export class AuthManager {
-  private appAuth: ReturnType<typeof createAppAuth>;
-  private tokenCache: LRUCache<number, string>;
-
-  constructor() {
-    this.appAuth = createAppAuth({
-      appId: process.env.GITHUB_APP_ID!,
-      privateKey: Buffer.from(process.env.GITHUB_APP_PRIVATE_KEY_BASE64!, 'base64').toString(),
+  // Webhooks.verifyAndReceive handles signature verification internally
+  try {
+    await githubApp.webhooks.verifyAndReceive({
+      id: deliveryId!,
+      name: event as any,
+      signature: signature!,
+      payload: body, // Must be raw string, not parsed JSON
     });
-
-    // Token cache with 60-minute TTL
-    this.tokenCache = new LRUCache<number, string>({
-      max: 100,
-      ttl: 1000 * 60 * 59, // 59 minutes
-    });
+    return c.json({ ok: true });
+  } catch (error) {
+    console.error("Webhook verification failed:", error);
+    return c.json({ error: "Invalid signature" }, 401);
   }
-
-  async getInstallationToken(installationId: number): Promise<string> {
-    // Check cache first
-    const cached = this.tokenCache.get(installationId);
-    if (cached) return cached;
-
-    // Generate new token
-    const auth = await this.appAuth({
-      type: "installation",
-      installationId,
-    });
-
-    this.tokenCache.set(installationId, auth.token);
-    return auth.token;
-  }
-
-  async getJWT(): Promise<string> {
-    const auth = await this.appAuth({ type: "app" });
-    return auth.token;
-  }
-}
+});
 ```
 
 ### 3. Event Processing Pipeline
@@ -318,9 +272,17 @@ export class InstallationService {
       accountLogin: installation.account.login,
       accountType: installation.account.type,
       installedAt: Date.now(),
-      repos: JSON.stringify(repositories.map(r => r.full_name)),
       appSlug: installation.app_slug,
     });
+
+    // Store repositories in normalized table
+    for (const repo of repositories) {
+      await db.insert(installationRepositories).values({
+        installationId: installation.id,
+        repoFullName: repo.full_name,
+        addedAt: Date.now(),
+      });
+    }
 
     // Notify subscribed channels about new installation
     for (const repo of repositories) {
@@ -337,12 +299,14 @@ export class InstallationService {
   async handleInstallationDeleted(event: any) {
     const { installation } = event;
 
-    // Remove from database
+    // Get repos before deletion
+    const repos = await this.getInstallationRepos(installation.id);
+
+    // Remove from database (cascade deletes repositories)
     await db.delete(githubInstallations)
       .where(eq(githubInstallations.installationId, installation.id));
 
     // Notify channels
-    const repos = await this.getInstallationRepos(installation.id);
     for (const repo of repos) {
       const channels = await dbService.getRepoSubscribers(repo);
       for (const channel of channels) {
@@ -357,21 +321,47 @@ export class InstallationService {
   async handleRepositoriesAdded(event: any) {
     const { installation, repositories_added } = event;
 
-    // Update installation repos
-    const current = await this.getInstallationRepos(installation.id);
-    const updated = [...current, ...repositories_added.map(r => r.full_name)];
+    // Add new repositories to normalized table
+    for (const repo of repositories_added) {
+      await db.insert(installationRepositories).values({
+        installationId: installation.id,
+        repoFullName: repo.full_name,
+        addedAt: Date.now(),
+      }).onConflictDoNothing();
+    }
+  }
 
-    await db.update(githubInstallations)
-      .set({ repos: JSON.stringify(updated) })
-      .where(eq(githubInstallations.installationId, installation.id));
+  async handleRepositoriesRemoved(event: any) {
+    const { installation, repositories_removed } = event;
+
+    // Remove repositories from normalized table
+    for (const repo of repositories_removed) {
+      await db.delete(installationRepositories)
+        .where(
+          and(
+            eq(installationRepositories.installationId, installation.id),
+            eq(installationRepositories.repoFullName, repo.full_name)
+          )
+        );
+    }
+  }
+
+  async getInstallationRepos(installationId: number): Promise<string[]> {
+    const repos = await db.select()
+      .from(installationRepositories)
+      .where(eq(installationRepositories.installationId, installationId));
+
+    return repos.map(r => r.repoFullName);
   }
 
   async isRepoInstalled(repo: string): Promise<number | null> {
-    const installations = await db.select()
-      .from(githubInstallations)
-      .where(sql`json_contains(repos, ${JSON.stringify(repo)})`);
+    // Query normalized table with proper indexing
+    const installation = await db.select()
+      .from(installationRepositories)
+      .where(eq(installationRepositories.repoFullName, repo))
+      .limit(1);
 
-    return installations[0]?.installationId || null;
+    return installation[0]?.installationId || null;
   }
 }
 ```
@@ -446,70 +436,40 @@ export class DualModeService {
 -- Add to existing schema
 CREATE TABLE IF NOT EXISTS github_installations
 (
-    installation_id
-    INTEGER
-    PRIMARY
-    KEY,
-    account_login
-    TEXT
-    NOT
-    NULL,
-    account_type
-    TEXT
-    NOT
-    NULL
-    CHECK (
-    account_type
-    IN
-(
-    'Organization',
-    'User'
-)),
+    installation_id INTEGER PRIMARY KEY,
+    account_login TEXT NOT NULL,
+    account_type TEXT NOT NULL CHECK (account_type IN ('Organization', 'User')),
     installed_at INTEGER NOT NULL,
     suspended_at INTEGER,
-    repos TEXT NOT NULL, -- JSON array
     app_slug TEXT NOT NULL DEFAULT 'towns-github-bot'
-    );
+);
 
+-- Normalized repository table - NO JSON columns
+CREATE TABLE IF NOT EXISTS installation_repositories
+(
+    installation_id INTEGER NOT NULL,
+    repo_full_name TEXT NOT NULL,
+    added_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (installation_id, repo_full_name),
+    FOREIGN KEY (installation_id) REFERENCES github_installations(installation_id) ON DELETE CASCADE
+);
+
+-- Webhook deliveries with proper idempotency key
 CREATE TABLE IF NOT EXISTS webhook_deliveries
 (
-    id
-    TEXT
-    PRIMARY
-    KEY,
-    installation_id
-    INTEGER,
-    event_type
-    TEXT
-    NOT
-    NULL,
-    event_id
-    TEXT
-    NOT
-    NULL,
-    delivered_at
-    INTEGER
-    NOT
-    NULL,
-    status
-    TEXT
-    DEFAULT
-    'pending',
-    error
-    TEXT,
-    retry_count
-    INTEGER
-    DEFAULT
-    0,
-    UNIQUE
-(
-    event_id
-)
-    );
+    delivery_id TEXT PRIMARY KEY,  -- X-GitHub-Delivery header value
+    installation_id INTEGER,
+    event_type TEXT NOT NULL,
+    delivered_at INTEGER NOT NULL,
+    status TEXT DEFAULT 'pending',
+    error TEXT,
+    retry_count INTEGER DEFAULT 0
+);
 
--- Index for efficient queries
-CREATE INDEX idx_installations_repos ON github_installations (repos);
-CREATE INDEX idx_deliveries_status ON webhook_deliveries (status, delivered_at);
+-- Indexes for efficient queries
+CREATE INDEX idx_installation_repos_by_name ON installation_repositories(repo_full_name);
+CREATE INDEX idx_installation_repos_by_install ON installation_repositories(installation_id);
+CREATE INDEX idx_deliveries_status ON webhook_deliveries(status, delivered_at);
 ```
 
 ### 8. Webhook Server Implementation
@@ -518,17 +478,49 @@ CREATE INDEX idx_deliveries_status ON webhook_deliveries (status, delivered_at);
 
 ```typescript
 import { GitHubApp } from "./github-app/app";
-import { WebhookHandler } from "./github-app/webhook-handler";
+import { WebhookProcessor } from "./github-app/webhook-processor";
 
 const githubApp = new GitHubApp();
-const webhookHandler = new WebhookHandler(githubApp);
+const webhookProcessor = new WebhookProcessor();
 
 // Add GitHub webhook endpoint
+// IMPORTANT: Do not use body parsing middleware before this endpoint
 app.post("/github-webhook", async (c) => {
+  // Get headers for webhook processing
+  const deliveryId = c.req.header("x-github-delivery");
+  const signature = c.req.header("x-hub-signature-256");
+  const event = c.req.header("x-github-event");
+
+  if (!deliveryId || !signature || !event) {
+    return c.json({ error: "Missing required headers" }, 400);
+  }
+
+  // Check idempotency
+  if (await webhookProcessor.isProcessed(deliveryId)) {
+    return c.json({ message: "Already processed" }, 200);
+  }
+
   try {
-    return await webhookHandler.verifyAndProcess(c.req);
+    // Get raw body for signature verification
+    const body = await c.req.text();
+
+    // Use Octokit's built-in verification and processing
+    await githubApp.webhooks.verifyAndReceive({
+      id: deliveryId,
+      name: event as any,
+      signature: signature,
+      payload: body, // Must be raw string, not parsed JSON
+    });
+
+    // Mark as processed for idempotency
+    await webhookProcessor.markProcessed(deliveryId);
+
+    return c.json({ ok: true });
   } catch (error) {
     console.error("Webhook error:", error);
+    if (error.message?.includes("signature")) {
+      return c.json({ error: "Invalid signature" }, 401);
+    }
     return c.json({ error: "Processing failed" }, 500);
   }
 });
@@ -558,19 +550,19 @@ app.get("/health", async (c) => {
 
 ```bash
 # GitHub App Configuration
-GITHUB_APP_ID=123456
-GITHUB_APP_PRIVATE_KEY_BASE64=LS0tLS1CRUdJTi...
-GITHUB_APP_CLIENT_ID=Iv1.abc123def456
-GITHUB_APP_CLIENT_SECRET=abc123def456abc123def456abc123def456
-GITHUB_APP_SLUG=towns-github-bot
+GITHUB_APP_ID=YOUR_APP_ID
+GITHUB_APP_PRIVATE_KEY_BASE64=your-base64-encoded-private-key-here
+GITHUB_APP_CLIENT_ID=YOUR_CLIENT_ID
+GITHUB_APP_CLIENT_SECRET=your-client-secret-here
+GITHUB_APP_SLUG=your-app-slug
 GITHUB_WEBHOOK_SECRET=your-webhook-secret-here
 
 # Legacy (keep for backward compatibility)
-GITHUB_TOKEN=ghp_xxx
+GITHUB_TOKEN=YOUR_LEGACY_TOKEN
 
 # Towns Bot Configuration
-APP_PRIVATE_DATA=...
-JWT_SECRET=...
+APP_PRIVATE_DATA=your-app-private-data-here
+JWT_SECRET=your-jwt-secret-here
 
 # Application
 PUBLIC_URL=https://bot.example.com
