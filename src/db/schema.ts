@@ -29,3 +29,46 @@ export const repoPollingState = sqliteTable("repo_polling_state", {
   lastPolledAt: integer("last_polled_at", { mode: "timestamp" }),
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
 });
+
+/**
+ * Stores GitHub App installations
+ * Tracks which accounts have installed the GitHub App
+ */
+export const githubInstallations = sqliteTable("github_installations", {
+  installationId: integer("installation_id").primaryKey(),
+  accountLogin: text("account_login").notNull(),
+  accountType: text("account_type").notNull(), // "Organization" or "User"
+  installedAt: integer("installed_at", { mode: "timestamp" }).notNull(),
+  suspendedAt: integer("suspended_at", { mode: "timestamp" }),
+  appSlug: text("app_slug").notNull().default("towns-github-bot"),
+});
+
+/**
+ * Stores repositories for each GitHub App installation
+ * Normalized table - NO JSON columns (proper SQLite design)
+ */
+export const installationRepositories = sqliteTable(
+  "installation_repositories",
+  {
+    installationId: integer("installation_id").notNull(),
+    repoFullName: text("repo_full_name").notNull(), // Format: "owner/repo"
+    addedAt: integer("added_at", { mode: "timestamp" }).notNull(),
+  },
+  table => ({
+    pk: unique().on(table.installationId, table.repoFullName),
+  })
+);
+
+/**
+ * Stores webhook delivery tracking for idempotency
+ * Uses X-GitHub-Delivery header as primary key
+ */
+export const webhookDeliveries = sqliteTable("webhook_deliveries", {
+  deliveryId: text("delivery_id").primaryKey(), // X-GitHub-Delivery header value
+  installationId: integer("installation_id"),
+  eventType: text("event_type").notNull(),
+  deliveredAt: integer("delivered_at", { mode: "timestamp" }).notNull(),
+  status: text("status").notNull().default("pending"), // "pending", "success", "failed"
+  error: text("error"),
+  retryCount: integer("retry_count").notNull().default(0),
+});
