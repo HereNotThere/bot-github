@@ -12,6 +12,7 @@
     "lint": "eslint --format unix ./src  --max-warnings=0",
     "lint:fix": "eslint --format unix ./src  --max-warnings=0 --fix",
     "start": "bun run src/index.ts",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
