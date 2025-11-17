@@ -141,9 +141,10 @@ export function formatEvent(
         return buildMessage({
           emoji: "🚀",
           header: "Release Published",
-          repository: `${repo.name} ${release.tag_name}`,
+          repository: repo.name,
           title: release.name || release.tag_name,
           user: actor.login,
+          metadata: [`📦 ${release.tag_name}`],
           url: release.html_url,
         });
       }

@@ -110,13 +110,15 @@ export function formatRelease(payload: ReleaseEvent): string {
   const { action, release, repository } = payload;
 
   if (action === "published") {
-    return (
-      `🚀 **Release Published**\n` +
-      `**${repository.full_name}** ${release.tag_name}\n\n` +
-      `**${release.name || release.tag_name}**\n` +
-      `👤 ${release.author.login}\n` +
-      `🔗 ${release.html_url}`
-    );
+    return buildMessage({
+      emoji: "🚀",
+      header: "Release Published",
+      repository: repository.full_name,
+      title: release.name || release.tag_name,
+      user: release.author.login,
+      metadata: [`📦 ${release.tag_name}`],
+      url: release.html_url,
+    });
   }
 
   return "";
