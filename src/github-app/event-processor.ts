@@ -9,16 +9,16 @@ import {
   formatPullRequestReview,
 } from "../formatters/webhook-events";
 import type {
-  PullRequestEvent,
-  IssuesEvent,
-  PushEvent,
-  ReleaseEvent,
-  WorkflowRunEvent,
-  IssueCommentEvent,
-  PullRequestReviewEvent,
-  CreateEvent,
-  DeleteEvent,
-} from "@octokit/webhooks-types";
+  PullRequestPayload,
+  IssuesPayload,
+  PushPayload,
+  ReleasePayload,
+  WorkflowRunPayload,
+  IssueCommentPayload,
+  PullRequestReviewPayload,
+  CreatePayload,
+  DeletePayload,
+} from "../types/webhooks";
 
 interface TownsBot {
   sendMessage: (channelId: string, message: string) => Promise<unknown>;
@@ -39,7 +39,7 @@ export class EventProcessor {
   /**
    * Process a pull request webhook event
    */
-  async processPullRequest(event: PullRequestEvent): Promise<void> {
+  async processPullRequest(event: PullRequestPayload) {
     const { pull_request, repository } = event;
 
     console.log(
@@ -82,7 +82,7 @@ export class EventProcessor {
   /**
    * Process a push webhook event (commits)
    */
-  async processPush(event: PushEvent): Promise<void> {
+  async processPush(event: PushPayload) {
     const { repository, ref, commits } = event;
 
     console.log(
@@ -123,7 +123,7 @@ export class EventProcessor {
   /**
    * Process an issues webhook event
    */
-  async processIssues(event: IssuesEvent): Promise<void> {
+  async processIssues(event: IssuesPayload) {
     const { issue, repository } = event;
 
     console.log(
@@ -166,7 +166,7 @@ export class EventProcessor {
   /**
    * Process a release webhook event
    */
-  async processRelease(event: ReleaseEvent): Promise<void> {
+  async processRelease(event: ReleasePayload) {
     const { release, repository } = event;
 
     console.log(
@@ -209,7 +209,7 @@ export class EventProcessor {
   /**
    * Process a workflow run webhook event (CI)
    */
-  async processWorkflowRun(event: WorkflowRunEvent): Promise<void> {
+  async processWorkflowRun(event: WorkflowRunPayload) {
     const { workflow_run, repository } = event;
 
     console.log(
@@ -252,7 +252,7 @@ export class EventProcessor {
   /**
    * Process an issue comment webhook event
    */
-  async processIssueComment(event: IssueCommentEvent): Promise<void> {
+  async processIssueComment(event: IssueCommentPayload) {
     const { issue, repository } = event;
 
     console.log(
@@ -295,7 +295,7 @@ export class EventProcessor {
   /**
    * Process a pull request review webhook event
    */
-  async processPullRequestReview(event: PullRequestReviewEvent): Promise<void> {
+  async processPullRequestReview(event: PullRequestReviewPayload) {
     const { pull_request, repository } = event;
 
     console.log(
@@ -339,9 +339,9 @@ export class EventProcessor {
    * Process branch create/delete events
    */
   async processBranchEvent(
-    event: CreateEvent | DeleteEvent,
+    event: CreatePayload | DeletePayload,
     eventType: "create" | "delete"
-  ): Promise<void> {
+  ) {
     const { repository } = event;
 
     console.log(`Processing ${eventType} event: ${repository.full_name}`);

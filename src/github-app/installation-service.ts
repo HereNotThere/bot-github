@@ -2,11 +2,9 @@ import { db, dbService } from "../db";
 import { githubInstallations, installationRepositories } from "../db/schema";
 import { eq, and } from "drizzle-orm";
 import type {
-  InstallationCreatedEvent,
-  InstallationDeletedEvent,
-  InstallationRepositoriesAddedEvent,
-  InstallationRepositoriesRemovedEvent,
-} from "@octokit/webhooks-types";
+  InstallationPayload,
+  InstallationRepositoriesPayload,
+} from "../types/webhooks";
 
 interface TownsBot {
   sendMessage: (channelId: string, message: string) => Promise<unknown>;
@@ -28,37 +26,46 @@ export class InstallationService {
   /**
    * Handle GitHub App installation created event
    */
-  async handleInstallationCreated(
-    event: InstallationCreatedEvent
-  ): Promise<void> {
+  async handleInstallationCreated(event: InstallationPayload) {
     const { installation, repositories } = event;
 
-    console.log(
-      `GitHub App installed: ${installation.account.login} (${installation.id})`
-    );
+    // Get account info with proper type checking
+    const account = installation.account;
+    const accountLogin =
+      (account && "login" in account ? account.login : account?.name) ??
+      "unknown";
+    const accountType =
+      (account && "type" in account ? account.type : undefined) ??
+      "Organization";
+
+    console.log(`GitHub App installed: ${accountLogin} (${installation.id})`);
 
     // Store installation in database
     await db.insert(githubInstallations).values({
       installationId: installation.id,
-      accountLogin: installation.account.login,
-      accountType: installation.account.type,
+      accountLogin,
+      accountType,
       installedAt: new Date(),
       suspendedAt: null,
       appSlug: installation.app_slug || "towns-github-bot",
     });
 
     // Store repositories in normalized table
-    for (const repo of repositories) {
-      await db.insert(installationRepositories).values({
-        installationId: installation.id,
-        repoFullName: repo.full_name,
-        addedAt: new Date(),
-      });
+    if (repositories) {
+      for (const repo of repositories) {
+        if (!repo.full_name) continue;
+        await db.insert(installationRepositories).values({
+          installationId: installation.id,
+          repoFullName: repo.full_name,
+          addedAt: new Date(),
+        });
+      }
     }
 
     // Notify subscribed channels about new installation
-    if (this.bot) {
+    if (this.bot && repositories) {
       for (const repo of repositories) {
+        if (!repo.full_name) continue;
         const channels = await dbService.getRepoSubscribers(repo.full_name);
         for (const channel of channels) {
           await this.bot.sendMessage(
@@ -73,14 +80,16 @@ export class InstallationService {
   /**
    * Handle GitHub App installation deleted event
    */
-  async handleInstallationDeleted(
-    event: InstallationDeletedEvent
-  ): Promise<void> {
+  async handleInstallationDeleted(event: InstallationPayload) {
     const { installation } = event;
 
-    console.log(
-      `GitHub App uninstalled: ${installation.account.login} (${installation.id})`
-    );
+    // Get account info with proper type checking
+    const account = installation.account;
+    const accountLogin =
+      (account && "login" in account ? account.login : account?.name) ??
+      "unknown";
+
+    console.log(`GitHub App uninstalled: ${accountLogin} (${installation.id})`);
 
     // Get repos before deletion
     const repos = await this.getInstallationRepos(installation.id);
@@ -107,17 +116,16 @@ export class InstallationService {
   /**
    * Handle repositories added to installation
    */
-  async handleRepositoriesAdded(
-    event: InstallationRepositoriesAddedEvent
-  ): Promise<void> {
+  async handleRepositoriesAdded(event: InstallationRepositoriesPayload) {
     const { installation, repositories_added } = event;
 
     console.log(
-      `Repositories added to installation ${installation.id}: ${repositories_added.map(r => r.full_name).join(", ")}`
+      `Repositories added to installation ${installation.id}: ${repositories_added.map(r => r.full_name || "unknown").join(", ")}`
     );
 
     // Add new repositories to normalized table
     for (const repo of repositories_added) {
+      if (!repo.full_name) continue;
       await db
         .insert(installationRepositories)
         .values({
@@ -131,6 +139,7 @@ export class InstallationService {
     // Notify subscribed channels
     if (this.bot) {
       for (const repo of repositories_added) {
+        if (!repo.full_name) continue;
         const channels = await dbService.getRepoSubscribers(repo.full_name);
         for (const channel of channels) {
           await this.bot.sendMessage(
@@ -145,17 +154,16 @@ export class InstallationService {
   /**
    * Handle repositories removed from installation
    */
-  async handleRepositoriesRemoved(
-    event: InstallationRepositoriesRemovedEvent
-  ): Promise<void> {
+  async handleRepositoriesRemoved(event: InstallationRepositoriesPayload) {
     const { installation, repositories_removed } = event;
 
     console.log(
-      `Repositories removed from installation ${installation.id}: ${repositories_removed.map(r => r.full_name).join(", ")}`
+      `Repositories removed from installation ${installation.id}: ${repositories_removed.map(r => r.full_name || "unknown").join(", ")}`
     );
 
     // Remove repositories from normalized table
     for (const repo of repositories_removed) {
+      if (!repo.full_name) continue;
       await db
         .delete(installationRepositories)
         .where(
@@ -169,6 +177,7 @@ export class InstallationService {
     // Notify subscribed channels
     if (this.bot) {
       for (const repo of repositories_removed) {
+        if (!repo.full_name) continue;
         const channels = await dbService.getRepoSubscribers(repo.full_name);
         for (const channel of channels) {
           await this.bot.sendMessage(

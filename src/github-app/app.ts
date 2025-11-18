@@ -1,6 +1,5 @@
 import { App } from "@octokit/app";
 import { Webhooks } from "@octokit/webhooks";
-import type { Octokit } from "@octokit/rest";
 
 /**
  * GitHubApp - Core GitHub App integration
@@ -67,7 +66,7 @@ export class GitHubApp {
    * @param installationId - GitHub App installation ID
    * @returns Authenticated Octokit instance for the installation
    */
-  async getInstallationOctokit(installationId: number): Promise<Octokit> {
+  async getInstallationOctokit(installationId: number) {
     if (!this.app) {
       throw new Error("GitHub App not configured");
     }
