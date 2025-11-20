@@ -79,7 +79,7 @@ Receive real-time notifications for:
 
    Edit `.env` with your values:
 
-   ```
+   ```dotenv
    APP_PRIVATE_DATA=<from Towns Developer Portal>
    JWT_SECRET=<from Towns Developer Portal>
    PORT=5123
@@ -112,7 +112,7 @@ Receive real-time notifications for:
 
    Then point your `.env` at the container:
 
-   ```
+   ```dotenv
    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/github-bot
    DATABASE_SSL=false
    ```
@@ -270,13 +270,11 @@ src/
 ## Limitations (MVP)
 
 - **Public repos only** - No OAuth, uses bot's PAT
-- **In-memory storage** - Subscriptions lost on restart (use SQLite for production)
 - **No interactive actions** - Towns doesn't support buttons yet
 - **No private repo access** - Would require per-user OAuth
 
 ## Future Enhancements
 
-- [ ] SQLite/PostgreSQL persistence for subscriptions
 - [ ] Per-user OAuth for private repository access
 - [ ] More slash commands (`/gh_pr search`, `/gh_release list`)
 - [ ] Scheduled digests (daily/weekly summaries)
