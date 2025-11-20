@@ -88,6 +88,8 @@ Receive real-time notifications for:
    DATABASE_URL=postgresql://user:pass@host:5432/github_bot
    DATABASE_SSL=true
    DATABASE_POOL_SIZE=5
+   DATABASE_CA_CERT_PATH=/path/to/ca.pem   # optional - custom CA bundle
+   DEV_DISABLE_SSL_VALIDATION=false        # only for local dev if needed
 
    # GitHub Integration
    GITHUB_TOKEN=<your GitHub Personal Access Token>
