@@ -13,6 +13,7 @@ import { WebhookProcessor } from "./github-app/webhook-processor";
 import { InstallationService } from "./github-app/installation-service";
 import { EventProcessor } from "./github-app/event-processor";
 import { handleGitHubWebhook } from "./routes/github-webhook";
+import { GitHubOAuthService } from "./services/github-oauth-service";
 
 await dbReady;
 console.log("✅ Database ready (schema ensured)");
@@ -33,6 +34,7 @@ const githubApp = new GitHubApp();
 const webhookProcessor = new WebhookProcessor();
 const installationService = new InstallationService(bot);
 const eventProcessor = new EventProcessor(bot);
+const oauthService = new GitHubOAuthService(githubApp);
 
 // Register webhook event handlers (only if GitHub App is configured)
 if (githubApp.isEnabled()) {
@@ -135,6 +137,74 @@ app.use(logger());
 
 // Towns webhook endpoint
 app.post("/webhook", jwtMiddleware, handler);
+
+// OAuth callback endpoint
+app.get("/oauth/callback", async c => {
+  const code = c.req.query("code");
+  const state = c.req.query("state");
+
+  if (!code || !state) {
+    return c.html(
+      `
+      <html>
+        <body>
+          <h1>OAuth Error</h1>
+          <p>Missing code or state parameter</p>
+        </body>
+      </html>
+    `,
+      400
+    );
+  }
+
+  try {
+    // Handle OAuth callback
+    const result = await oauthService.handleCallback(code, state);
+
+    // Send success message to the channel
+    await bot.sendMessage(
+      result.channelId,
+      `✅ GitHub account @${result.githubLogin} connected successfully!`
+    );
+
+    // If there was a redirect action (e.g., subscribe), notify user
+    if (result.redirectAction === "subscribe" && result.redirectData) {
+      const data = result.redirectData as { repo?: string };
+      if (data.repo) {
+        await bot.sendMessage(
+          result.channelId,
+          `You can now run \`/github subscribe ${data.repo}\``
+        );
+      }
+    }
+
+    return c.html(`
+      <html>
+        <body>
+          <h1>Success!</h1>
+          <p>Your GitHub account has been connected.</p>
+          <p>You can close this window and return to Towns.</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error("OAuth callback error:", error);
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error";
+
+    return c.html(
+      `
+      <html>
+        <body>
+          <h1>OAuth Error</h1>
+          <p>${errorMessage}</p>
+        </body>
+      </html>
+    `,
+      400
+    );
+  }
+});
 
 // GitHub App webhook endpoint
 app.post("/github-webhook", c =>
