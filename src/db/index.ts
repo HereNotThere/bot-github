@@ -7,12 +7,12 @@ import { eq, and } from "drizzle-orm";
 import { subscriptions, repoPollingState } from "./schema";
 import { DEFAULT_EVENT_TYPES } from "../constants/event-types";
 
-const connectionString =
-  process.env.DATABASE_URL ?? "postgresql://localhost:5432/github-bot";
+const defaultConnection = "postgresql://localhost:5432/github-bot";
+const connectionString = process.env.DATABASE_URL ?? defaultConnection;
 
 if (!process.env.DATABASE_URL) {
   console.warn(
-    "[db] DATABASE_URL not set. Falling back to local postgres://localhost:5432/github-bot"
+    `[db] DATABASE_URL not set. Falling back to local ${defaultConnection}`
   );
 }
 

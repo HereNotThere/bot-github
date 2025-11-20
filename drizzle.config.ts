@@ -5,9 +5,6 @@ export default defineConfig({
   schema: "./src/db/schema.ts",
   out: "./drizzle",
   dbCredentials: {
-    url:
-      process.env.DATABASE_URL ??
-      "postgresql://localhost:5432/github-bot",
+    url: process.env.DATABASE_URL ?? "postgresql://localhost:5432/github-bot",
   },
 });
-

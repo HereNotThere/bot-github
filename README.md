@@ -85,7 +85,7 @@ Receive real-time notifications for:
    PORT=5123
 
    # Database (Render Postgres)
-   DATABASE_URL=postgresql://user:pass@host:5432/github_bot
+   DATABASE_URL=postgresql://user:pass@host:5432/github-bot
    DATABASE_SSL=true
    DATABASE_POOL_SIZE=5
    DATABASE_CA_CERT_PATH=/path/to/ca.pem   # optional - custom CA bundle
@@ -105,7 +105,7 @@ Receive real-time notifications for:
    docker run --rm --name github-bot-db \
      -e POSTGRES_USER=postgres \
      -e POSTGRES_PASSWORD=postgres \
-     -e POSTGRES_DB=github_bot \
+     -e POSTGRES_DB=github-bot \
      -p 5432:5432 \
      postgres:18
    ```
@@ -113,7 +113,7 @@ Receive real-time notifications for:
    Then point your `.env` at the container:
 
    ```
-   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/github_bot
+   DATABASE_URL=postgresql://postgres:postgres@localhost:5432/github-bot
    DATABASE_SSL=false
    ```
 
