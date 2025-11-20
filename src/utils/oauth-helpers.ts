@@ -11,16 +11,25 @@ export async function sendOAuthPrompt(
   userId: string,
   spaceId: string
 ): Promise<void> {
-  const authUrl = await oauthService.getAuthorizationUrl(
-    userId,
-    spaceId,
-    channelId
-  );
-  await handler.sendMessage(
-    channelId,
-    "🔐 **GitHub Account Required**\n\n" +
-      "This repository requires authentication.\n\n" +
-      `[Connect GitHub Account](${authUrl})\n\n` +
-      "Run the command again after connecting."
-  );
+  try {
+    const authUrl = await oauthService.getAuthorizationUrl(
+      userId,
+      spaceId,
+      channelId
+    );
+    await handler.sendMessage(
+      channelId,
+      "🔐 **GitHub Account Required**\n\n" +
+        "This repository requires authentication.\n\n" +
+        `[Connect GitHub Account](${authUrl})\n\n` +
+        "Run the command again after connecting."
+    );
+  } catch (error) {
+    console.error("Failed to send OAuth prompt:", {
+      userId,
+      spaceId,
+      channelId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
