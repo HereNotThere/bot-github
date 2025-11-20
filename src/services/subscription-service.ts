@@ -7,6 +7,7 @@ import {
   type UserProfile,
 } from "../api/user-oauth-client";
 import {
+  ALLOWED_EVENT_TYPES,
   DEFAULT_EVENT_TYPES,
   PENDING_MESSAGE_CLEANUP_INTERVAL_MS,
   PENDING_MESSAGE_MAX_AGE_MS,
@@ -424,6 +425,180 @@ export class SubscriptionService {
   }
 
   /**
+   * Get a specific subscription
+   */
+  async getSubscription(
+    spaceId: string,
+    channelId: string,
+    repoFullName: string
+  ): Promise<{
+    id: number;
+    eventTypes: string;
+    deliveryMode: string;
+  } | null> {
+    const results = await db
+      .select({
+        id: githubSubscriptions.id,
+        eventTypes: githubSubscriptions.eventTypes,
+        deliveryMode: githubSubscriptions.deliveryMode,
+      })
+      .from(githubSubscriptions)
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      )
+      .limit(1);
+
+    return results[0] || null;
+  }
+
+  /**
+   * Add event types to an existing subscription
+   * Returns the updated event types string
+   */
+  async addEventTypes(
+    spaceId: string,
+    channelId: string,
+    repoFullName: string,
+    newEventTypes: string[]
+  ): Promise<{ success: boolean; eventTypes?: string; error?: string }> {
+    const subscription = await this.getSubscription(
+      spaceId,
+      channelId,
+      repoFullName
+    );
+
+    if (!subscription) {
+      return {
+        success: false,
+        error: `Not subscribed to ${repoFullName}`,
+      };
+    }
+
+    // Parse existing event types (normalize to lowercase)
+    const existingTypes = this.parseEventTypesString(subscription.eventTypes);
+
+    // Validate and normalize new event types
+    const normalizedNew = newEventTypes
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
+
+    const allowedSet = new Set(ALLOWED_EVENT_TYPES);
+    const invalidTypes = normalizedNew.filter(
+      t => !allowedSet.has(t as (typeof ALLOWED_EVENT_TYPES)[number])
+    );
+    if (invalidTypes.length > 0) {
+      return {
+        success: false,
+        error: `Invalid event types: ${invalidTypes.join(", ")}. Allowed: ${ALLOWED_EVENT_TYPES.join(", ")}`,
+      };
+    }
+
+    // Merge and deduplicate
+    const mergedTypes = Array.from(
+      new Set([...existingTypes, ...normalizedNew])
+    );
+    const updatedEventTypes = mergedTypes.join(",");
+
+    // Update subscription
+    await db
+      .update(githubSubscriptions)
+      .set({
+        eventTypes: updatedEventTypes,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      );
+
+    return {
+      success: true,
+      eventTypes: updatedEventTypes,
+    };
+  }
+
+  /**
+   * Remove event types from an existing subscription
+   * If all event types are removed, deletes the subscription entirely
+   * Returns whether the subscription still exists and the updated event types
+   */
+  async removeEventTypes(
+    spaceId: string,
+    channelId: string,
+    repoFullName: string,
+    typesToRemove: string[]
+  ): Promise<{
+    success: boolean;
+    deleted?: boolean;
+    eventTypes?: string;
+    error?: string;
+  }> {
+    const subscription = await this.getSubscription(
+      spaceId,
+      channelId,
+      repoFullName
+    );
+
+    if (!subscription) {
+      return {
+        success: false,
+        error: `Not subscribed to ${repoFullName}`,
+      };
+    }
+
+    // Parse existing event types (normalize to lowercase)
+    const existingTypes = this.parseEventTypesString(subscription.eventTypes);
+
+    // Normalize types to remove
+    const normalizedRemove = typesToRemove
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
+
+    // Remove specified types
+    const remainingTypes = existingTypes.filter(
+      t => !normalizedRemove.includes(t)
+    );
+
+    // If no types remain, delete the subscription
+    if (remainingTypes.length === 0) {
+      await this.unsubscribe(channelId, spaceId, repoFullName);
+      return {
+        success: true,
+        deleted: true,
+      };
+    }
+
+    // Update subscription with remaining types
+    const updatedEventTypes = remainingTypes.join(",");
+    await db
+      .update(githubSubscriptions)
+      .set({
+        eventTypes: updatedEventTypes,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      );
+
+    return {
+      success: true,
+      deleted: false,
+      eventTypes: updatedEventTypes,
+    };
+  }
+
+  /**
    * Generate GitHub App installation URL
    * @param targetId - Owner ID (user or org)
    * @returns Installation URL
@@ -431,5 +606,18 @@ export class SubscriptionService {
   private generateInstallUrl(targetId: number): string {
     const appSlug = process.env.GITHUB_APP_SLUG || "towns-github-bot";
     return `https://github.com/apps/${appSlug}/installations/new/permissions?target_id=${targetId}`;
+  }
+
+  /**
+   * Parse and normalize event types string to canonical lowercase array
+   * @param eventTypes - Comma-separated event types string
+   * @returns Array of normalized event type tokens
+   */
+  private parseEventTypesString(eventTypes: string | null): string[] {
+    if (!eventTypes) return [];
+    return eventTypes
+      .split(",")
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
   }
 }

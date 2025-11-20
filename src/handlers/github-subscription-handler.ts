@@ -22,8 +22,8 @@ export async function handleGithubSubscription(
     await handler.sendMessage(
       channelId,
       "**Usage:**\n" +
-        "• `/github subscribe owner/repo [--events pr,issues,commits,releases,ci,comments,reviews,branches,review_comments,stars,forks,all]` - Subscribe to GitHub events\n" +
-        "• `/github unsubscribe owner/repo` - Unsubscribe from a repository\n" +
+        "• `/github subscribe owner/repo [--events pr,issues,commits,releases,ci,comments,reviews,branches,review_comments,stars,forks,all]` - Subscribe to GitHub events or add event types\n" +
+        "• `/github unsubscribe owner/repo [--events type1,type2]` - Unsubscribe from a repository or remove specific event types\n" +
         "• `/github status` - Show current subscriptions"
     );
     return;
@@ -89,6 +89,8 @@ async function handleSubscribe(
     return;
   }
 
+  const hasEventsFlag = args.some(arg => arg.startsWith("--events"));
+
   // Parse and validate event types from args
   let eventTypes: string;
   try {
@@ -97,6 +99,45 @@ async function handleSubscribe(
     const errorMessage =
       error instanceof Error ? error.message : "Invalid event types";
     await handler.sendMessage(channelId, `❌ ${errorMessage}`);
+    return;
+  }
+
+  // Check if already subscribed - if so, add event types instead (case-insensitive match)
+  const channelSubscriptions =
+    await subscriptionService.getChannelSubscriptions(channelId, spaceId);
+  const existingSubscription = channelSubscriptions.find(
+    sub => sub.repo.toLowerCase() === repo.toLowerCase()
+  );
+
+  if (existingSubscription && hasEventsFlag) {
+    // Add event types to existing subscription
+    const addResult = await subscriptionService.addEventTypes(
+      spaceId,
+      channelId,
+      existingSubscription.repo,
+      eventTypes.split(",").map(t => t.trim())
+    );
+
+    if (!addResult.success) {
+      await handler.sendMessage(channelId, `❌ ${addResult.error}`);
+      return;
+    }
+
+    const mode = existingSubscription.deliveryMode === "webhook" ? "⚡" : "⏱️";
+    await handler.sendMessage(
+      channelId,
+      `✅ **Updated subscription to ${repo}**\n\n` +
+        `${mode} Event types: **${formatEventTypes(addResult.eventTypes!)}**`
+    );
+    return;
+  }
+
+  if (existingSubscription && !hasEventsFlag) {
+    await handler.sendMessage(
+      channelId,
+      `❌ Already subscribed to **${existingSubscription.repo}**\n\n` +
+        "Use `--events` to add specific event types, or `/github status` to view current settings."
+    );
     return;
   }
 
@@ -200,12 +241,12 @@ async function handleUnsubscribe(
   subscriptionService: SubscriptionService,
   repoArg: string | undefined
 ): Promise<void> {
-  const { channelId, spaceId } = event;
+  const { channelId, spaceId, args } = event;
 
   if (!repoArg) {
     await handler.sendMessage(
       channelId,
-      "❌ Usage: `/github unsubscribe owner/repo`"
+      "❌ Usage: `/github unsubscribe owner/repo [--events type1,type2]`"
     );
     return;
   }
@@ -248,7 +289,93 @@ async function handleUnsubscribe(
     return;
   }
 
-  // Remove subscription using canonical repo name from the DB
+  // Check for --events flag for granular unsubscribe
+  const eventsIndex = args.findIndex(arg => arg.startsWith("--events"));
+
+  if (eventsIndex !== -1) {
+    // Granular unsubscribe - remove specific event types
+    let eventTypesToRemove: string;
+
+    // Parse event types
+    if (args[eventsIndex].includes("=")) {
+      eventTypesToRemove = args[eventsIndex].split("=")[1] || "";
+    } else if (eventsIndex + 1 < args.length) {
+      eventTypesToRemove = args[eventsIndex + 1];
+    } else {
+      await handler.sendMessage(
+        channelId,
+        "❌ Please specify event types to remove: `--events pr,issues`"
+      );
+      return;
+    }
+
+    const typesToRemove = eventTypesToRemove
+      .split(",")
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
+
+    if (typesToRemove.length === 0) {
+      await handler.sendMessage(
+        channelId,
+        "❌ Please specify event types to remove: `--events pr,issues`"
+      );
+      return;
+    }
+
+    // Validate event types
+    const allowedSet = new Set(ALLOWED_EVENT_TYPES);
+    const invalidTypes = typesToRemove.filter(
+      t => !allowedSet.has(t as (typeof ALLOWED_EVENT_TYPES)[number])
+    );
+    if (invalidTypes.length > 0) {
+      await handler.sendMessage(
+        channelId,
+        `❌ Invalid event type(s): ${invalidTypes.join(", ")}\n\n` +
+          `Valid options: ${ALLOWED_EVENT_TYPES.join(", ")}`
+      );
+      return;
+    }
+
+    // Compute actually removed types (intersection with current subscription)
+    const existingTypes = subscription.eventTypes
+      ? subscription.eventTypes.split(",").map(t => t.trim().toLowerCase())
+      : [];
+    const actuallyRemoved = existingTypes.filter(t =>
+      typesToRemove.includes(t)
+    );
+
+    // Remove event types
+    const removeResult = await subscriptionService.removeEventTypes(
+      spaceId,
+      channelId,
+      subscription.repo,
+      typesToRemove
+    );
+
+    if (!removeResult.success) {
+      await handler.sendMessage(channelId, `❌ ${removeResult.error}`);
+      return;
+    }
+
+    if (removeResult.deleted) {
+      await handler.sendMessage(
+        channelId,
+        `✅ **Unsubscribed from ${repo}**\n\n` + `All event types were removed.`
+      );
+    } else {
+      const removedLabel =
+        actuallyRemoved.length > 0 ? actuallyRemoved.join(", ") : "(none)";
+      await handler.sendMessage(
+        channelId,
+        `✅ **Updated subscription to ${repo}**\n\n` +
+          `Removed: **${removedLabel}**\n` +
+          `Remaining: **${formatEventTypes(removeResult.eventTypes!)}**`
+      );
+    }
+    return;
+  }
+
+  // Full unsubscribe - remove entire subscription
   const success = await subscriptionService.unsubscribe(
     channelId,
     spaceId,
