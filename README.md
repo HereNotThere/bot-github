@@ -21,30 +21,9 @@ Receive instant webhook notifications for:
 - **Forks** - Repository forks
 - **Stars** - Repository stars (watch events)
 
-### 💬 Slash Commands
+### 💬 Interactive Commands
 
-**Subscription Management:**
-
-- `/github subscribe owner/repo` - Subscribe channel to repository events
-- `/github unsubscribe owner/repo` - Unsubscribe from a repository
-- `/github status` - Show current subscriptions
-
-**Query Commands:**
-
-- `/gh_pr owner/repo #123 [--full]` - Display single pull request details
-- `/gh_pr list owner/repo [count] [--state=...] [--author=...]` - List recent pull requests
-- `/gh_issue owner/repo #123 [--full]` - Display single issue details
-- `/gh_issue list owner/repo [count] [--state=...] [--creator=...]` - List recent issues
-
-**Filters:**
-
-- `--state=open|closed|merged|all` - Filter by state (merged only for PRs)
-- `--author=username` - Filter PRs by author
-- `--creator=username` - Filter issues by creator
-
-**Other:**
-
-- `/help` - Show all available commands
+Query and subscribe to repositories using slash commands. See [Usage](#usage) section for detailed examples.
 
 ## Features
 
@@ -85,27 +64,14 @@ Receive instant webhook notifications for:
    Edit `.env` with your values:
 
    ```dotenv
+   # Required
    APP_PRIVATE_DATA=<from Towns Developer Portal>
    JWT_SECRET=<from Towns Developer Portal>
-   PORT=5123
-
-   # Database (Required)
    DATABASE_URL=postgresql://user:pass@host:5432/github-bot
-   DATABASE_SSL=true
-   DATABASE_POOL_SIZE=5
-   DATABASE_CA_CERT_PATH=/path/to/ca.pem   # optional - custom CA bundle
-   DEV_DISABLE_SSL_VALIDATION=false        # only for local dev if needed
-
-   # GitHub App (Optional - enables real-time webhooks)
-   GITHUB_APP_ID=123456
-   GITHUB_APP_PRIVATE_KEY=<base64 encoded private key>
-   GITHUB_CLIENT_ID=Iv1.abc123
-   GITHUB_CLIENT_SECRET=<your client secret>
-   GITHUB_WEBHOOK_SECRET=<random secret for webhook security>
-
-   # Public URL (Required for OAuth callbacks)
    PUBLIC_URL=https://your-bot.onrender.com
    ```
+
+   > **Note:** See `CONTRIBUTING.md` for all configuration options including GitHub App setup, database options, and development settings.
 
 3. **Start Postgres locally for development**
 
@@ -154,115 +120,60 @@ Receive instant webhook notifications for:
 7. **Update webhook URL in Developer Portal**
    - Set to: `https://your-ngrok-url.ngrok-free.app/webhook`
 
-## Environment Variables
+## GitHub App Setup
 
-### Required
+The bot supports two delivery modes:
 
-- `APP_PRIVATE_DATA` - Your Towns bot private key (from Developer Portal)
-- `JWT_SECRET` - JWT secret for webhook authentication (from Developer Portal)
-- `DATABASE_URL` - PostgreSQL connection string
-- `PUBLIC_URL` - Your bot's public URL (required for OAuth callbacks)
+- **Polling mode** - Checks every 5 minutes (default, no setup required)
+- **Webhook mode** - Instant notifications (requires GitHub App installation)
 
-### Optional (Recommended for Real-Time Webhooks)
-
-- `GITHUB_APP_ID` - GitHub App ID
-- `GITHUB_APP_PRIVATE_KEY` - Base64-encoded GitHub App private key
-- `GITHUB_CLIENT_ID` - GitHub OAuth App client ID
-- `GITHUB_CLIENT_SECRET` - GitHub OAuth App client secret
-- `GITHUB_WEBHOOK_SECRET` - Secret for webhook signature verification
-- `PORT` - Port to run on (default: 3000)
-
-### Database Options
-
-- `DATABASE_SSL` - Enable SSL for database connection (default: false)
-- `DATABASE_POOL_SIZE` - Connection pool size (default: 10)
-- `DATABASE_CA_CERT_PATH` - Path to custom CA certificate
-- `DEV_DISABLE_SSL_VALIDATION` - Disable SSL validation (development only)
-
-## GitHub App Setup (Optional)
-
-Without a GitHub App, the bot uses **polling mode** (checks every 5 minutes).
-With a GitHub App, the bot uses **webhook mode** (instant notifications).
-
-### Quick Setup
-
-1. Visit `https://github.com/settings/apps/new`
-2. Fill in basic info:
-   - Name: `Towns GitHub Bot`
-   - Homepage URL: `https://github.com/your-org/towns-github-bot`
-   - Webhook URL: `https://your-bot.onrender.com/github-webhook`
-   - Webhook Secret: Generate a random secret
-3. Permissions:
-   - Repository: Contents (read), Issues (read), Pull requests (read), Metadata (read)
-   - Organization: Members (read)
-4. Subscribe to events: pull_request, push, issues, release, workflow_run, issue_comment, pull_request_review, create, delete, fork, watch
-5. Create the app and note down:
-   - App ID
-   - Client ID
-   - Client Secret
-   - Generate and download private key
-6. Base64 encode the private key: `base64 -i your-key.pem`
-7. Add all values to your `.env` file
+> **For GitHub App setup:** See `CONTRIBUTING.md` for detailed instructions on creating and configuring a GitHub App.
 
 ## Usage
 
-### Subscribe to GitHub Repository
+### Subscription Commands
 
-1. **First-time OAuth** - In a Towns channel, run:
+```bash
+# Subscribe to repository (first time: OAuth authentication required)
+/github subscribe owner/repo
 
-   ```
-   /github subscribe owner/repo
-   ```
-
-2. **Authenticate** - Click the OAuth link to connect your GitHub account
-
-3. **Start receiving notifications!**
-   - **With GitHub App installed**: Real-time webhooks (instant)
-   - **Without GitHub App**: Polling mode (every 5 minutes)
-
-4. **Optional: Install GitHub App** for real-time notifications:
-   - Bot will provide an install link if not already installed
-   - Install on your personal account or organization
-   - Repos with the app installed automatically get webhook delivery
-
-### Filter Events
-
-Subscribe to specific event types:
-
-```
+# Subscribe with specific event types
 /github subscribe owner/repo --events pr,issues,commits
+
+# View subscriptions
+/github status
+
+# Unsubscribe
+/github unsubscribe owner/repo
 ```
 
-Available event types: `pr`, `issues`, `commits`, `releases`, `ci`, `comments`, `reviews`, `branches`, `forks`, `stars`
+**Event types:** `pr`, `issues`, `commits`, `releases`, `ci`, `comments`, `reviews`, `branches`, `forks`, `stars`, `all`
 
-### Query GitHub Data
+**Delivery modes:**
 
-**Show single PR or issue:**
+- With GitHub App installed: Real-time webhooks (instant)
+- Without GitHub App: Polling mode (5-minute intervals)
 
+### Query Commands
+
+```bash
+# Show single PR or issue
+/gh_pr owner/repo 123         # Summary view
+/gh_pr owner/repo #123 --full # Full description
+/gh_issue owner/repo 456      # Summary view
+/gh_issue owner/repo #456 --full # Full description
+
+# List recent PRs or issues
+/gh_pr list owner/repo 10                  # 10 most recent
+/gh_pr list owner/repo 5 --state=open      # Filter by state
+/gh_pr list owner/repo 10 --author=user    # Filter by author
+
+/gh_issue list owner/repo 10               # 10 most recent
+/gh_issue list owner/repo 5 --state=closed # Filter by state
+/gh_issue list owner/repo 10 --creator=user # Filter by creator
 ```
-/gh_pr facebook/react 123         # Show PR details (summary)
-/gh_pr facebook/react #123 --full # Show PR with full description
-/gh_issue facebook/react 456      # Show issue details (summary)
-/gh_issue facebook/react #456 --full # Show issue with full description
-```
 
-**List recent PRs or issues:**
-
-```
-/gh_pr list facebook/react 10                    # List 10 most recent PRs
-/gh_pr list facebook/react 5 --state=open        # List 5 open PRs
-/gh_pr list facebook/react 10 --author=gaearon   # List PRs by author
-
-/gh_issue list facebook/react 10                 # List 10 most recent issues
-/gh_issue list facebook/react 5 --state=closed   # List 5 closed issues
-/gh_issue list facebook/react 10 --creator=dan   # List issues by creator
-```
-
-**Check subscriptions:**
-
-```
-/github status                    # Show current subscriptions
-```
+**Filters:** `--state=open|closed|merged|all`, `--author=username`, `--creator=username`
 
 ## Supported GitHub Events
 
@@ -301,10 +212,28 @@ All webhook events above, plus:
 
 ## Future Enhancements
 
+### Completed
+
 - [x] Automatic subscription upgrade when GitHub App is installed
 - [x] Private repo support for `/gh_pr` and `/gh_issue` commands
+
+### Subscription & UX
+
+- [ ] Improved subscription UX - Single OAuth flow with immediate subscription creation
+- [ ] Granular unsubscribe - Unsubscribe from specific event types without removing entire repo subscription
+- [ ] Subscription management - Update event filters for existing subscriptions
+
+### Event Organization
+
+- [ ] Thread-based event grouping - Group related events (PR + commits + CI) in threads to reduce channel noise
+- [ ] Event summaries - Digest multiple events into single update message
+
+### Commands & Queries
+
 - [ ] More slash commands (`/gh search`, `/gh_release list`)
-- [ ] Scheduled digests (daily/weekly summaries)
-- [ ] Thread organization for related webhook events
-- [ ] Advanced filtering (labels, assignees, milestones)
 - [ ] PR/Issue status commands (`/gh_pr merge`, `/gh_issue close`)
+- [ ] Advanced filtering (labels, assignees, milestones)
+
+### Automation
+
+- [ ] Scheduled digests (daily/weekly summaries)
