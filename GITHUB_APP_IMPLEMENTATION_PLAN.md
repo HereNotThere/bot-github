@@ -212,112 +212,139 @@ export type IssuesPayload = WebhookPayload<"issues">;
 
 ## Subscription Flow
 
-### Public Repositories
+### Improved UX: Single OAuth Flow
 
-When a user runs `/github subscribe owner/repo` in a Towns channel:
+**Goal:** User only leaves Towns app once. Subscription created automatically during OAuth callback.
 
-1. **Require GitHub OAuth linking**
-   - Check if the Towns user has linked their GitHub account
-   - If not linked, respond with "Connect your GitHub account" prompt and OAuth URL
+### Flow Overview
 
-2. **Resolve and validate the repository**
-   - Call `GET /repos/{owner}/{repo}` using the user's OAuth token
-   - If 404/403 response → treat as "repo not found or no access" and fail
+```
+/github subscribe owner/repo
+  ↓
+Ephemeral OAuth URL (security: only visible to requesting user)
+  ↓
+User authorizes on GitHub
+  ↓
+OAuth Callback:
+  - Creates subscription immediately
+  - Determines delivery mode (webhook/polling)
+  - Returns success page with:
+    * Confirmation: "Subscribed to owner/repo!"
+    * If webhook: Just success
+    * If polling: Install instructions + auto-redirect countdown (5s)
+  ↓
+[Optional] User installs GitHub App
+  ↓
+Installation webhook → Automatically upgrades polling to webhook
+```
+
+### Detailed Implementation
+
+#### 1. Slash Command Handler (`/github subscribe owner/repo`)
+
+**Purpose:** Validate input and show OAuth URL
+
+**Steps:**
+
+1. Validate repository format (`owner/repo`)
+2. Parse optional `--events` flag
+3. Check if user has OAuth token:
+   - **No token:** Show ephemeral OAuth URL with subscription params in state
+   - **Has token:** This flow is deprecated (subscription now created in OAuth callback)
+
+**OAuth URL State Parameter:**
+
+```json
+{
+  "action": "subscribe",
+  "townsUserId": "0x...",
+  "spaceId": "...",
+  "channelId": "...",
+  "repo": "owner/repo",
+  "eventTypes": "pr,issues,commits,..."
+}
+```
+
+**Security:** OAuth URL sent as `ephemeral: true` message (only visible to requesting user)
+
+#### 2. OAuth Callback (`/oauth/callback`)
+
+**Purpose:** Create subscription immediately after authorization
+
+**Steps:**
+
+1. **Decode state and get user token:**
+   - Parse subscription params from OAuth state
+   - Retrieve newly created OAuth token for user
+
+2. **Resolve and validate repository:**
+   - Call `GET /repos/{owner}/{repo}` using user's OAuth token
+   - If 404/403 → return error page: "You don't have access to this repository"
    - Extract from response:
      - `repo_full_name` (normalized owner/repo)
      - `private` flag (true/false)
-     - `owner.login` (account name)
-     - `owner.type` (`User` or `Organization`)
-     - `owner.id` (numeric ID for installation links)
+     - `owner.login`, `owner.type`, `owner.id`
 
-3. **Determine delivery mode**
-   - If `private == true`, follow Private Repositories flow instead
-   - If `private == false` (public repo):
-     - Query `installation_repositories` via `InstallationService` to check if any installation covers this `repo_full_name`
-     - If covered → set `delivery_mode = 'webhook'` and store the `installation_id`
-     - If not covered → set `delivery_mode = 'polling'` and `installation_id = NULL`
+3. **Determine delivery mode:**
+   - Query `installation_repositories` to check if app installed
+   - **If private repo:**
+     - Installed → `delivery_mode = 'webhook'`
+     - Not installed → return error page: "Private repo requires GitHub App installation"
+   - **If public repo:**
+     - Installed → `delivery_mode = 'webhook'`
+     - Not installed → `delivery_mode = 'polling'`
 
-4. **Persist subscription**
-   - Insert into `github_subscriptions` table with:
-     - `space_id`, `channel_id` from the Towns event
-     - `repo_full_name` (validated from GitHub)
-     - `delivery_mode` ('webhook' or 'polling')
-     - `is_private = 0`
-     - `created_by_towns_user_id` (Towns user ID)
-     - `created_by_github_login` (GitHub username from OAuth)
-     - `installation_id` (if webhook mode) or NULL (if polling mode)
-     - `created_at`, `updated_at` timestamps
+4. **Create subscription in database:**
+   - Insert into `github_subscriptions` table
+   - Include all metadata: `space_id`, `channel_id`, `repo_full_name`, `delivery_mode`, etc.
 
-5. **User messaging**
-   - Success message: `"Subscribed owner/repo to this channel."`
-   - Do NOT expose delivery mode (webhook vs polling) in the message
-   - If `delivery_mode = 'polling'`, append installation suggestion:
-     - Generate URL: `https://github.com/apps/<APP_SLUG>/installations/new/permissions?target_id=<owner.id>`
-     - Use smart heuristics to determine appropriate messaging:
-       - **Personal repo** (`owner.type == 'User' && owner.login == github_user.login`):
-         - "You can install the GitHub App for real-time delivery: [Install]"
-       - **Org repo** (check `GET /user/memberships/orgs/{owner.login}` for `role == 'admin'`):
-         - If admin: "You can install the GitHub App for real-time delivery: [Install]"
-         - If not admin: "Ask an org admin to install the GitHub App for real-time delivery: [Install]"
+5. **Return success page:**
 
-### Private Repositories
+**Success Page Format:**
 
-For private repositories:
+```html
+<!-- Webhook mode -->
+✅ Subscribed to owner/repo! ⚡ Real-time webhook delivery enabled Events: Pull
+requests, Issues, Commits, ... You can close this window and return to Towns.
 
-1. **Require GitHub OAuth linking**
-   - Same as public repositories flow
+<!-- Polling mode -->
+✅ Subscribed to owner/repo! ⏱️ Currently using 5-minute polling 💡 For
+real-time updates, install the GitHub App: [Install GitHub App Button]
+Auto-redirecting to installation in 5 seconds...
+<countdown timer> You can close this window and return to Towns.</countdown>
+```
 
-2. **Validate access**
-   - Call `GET /repos/{owner}/{repo}` using the user's OAuth token
-   - If user has read access, GitHub returns 200 (works for both user-owned and org-owned private repos)
-   - If no access (404/403), return clear error:
-     - `"You don't have access to this repository as <github_login>."`
+**Smart Installation URL:**
 
-3. **Require GitHub App installation**
-   - Check `installation_repositories` via `InstallationService` to see if any installation covers this repo
-   - If repo is NOT covered by any installation:
-     - **Do NOT create a subscription**
-     - Return installation URL with error message:
-       - `"This private repository requires the GitHub App to be installed. Install here: https://github.com/apps/<APP_SLUG>/installations/new/permissions?target_id=<owner.id>"`
-   - Note: We do NOT check all channel members' GitHub permissions (intentionally using Slack-style wide model - responsibility lies with the user configuring the subscription)
+- Pre-selects target account using `target_id=<owner.id>`
+- Example: `https://github.com/apps/towns-github-bot/installations/new/permissions?target_id=12345`
 
-4. **Persist subscription**
-   - If the repo IS covered by an installation:
-     - Insert into `github_subscriptions` table with:
-       - `delivery_mode = 'webhook'` (private repos MUST use webhooks)
-       - `is_private = 1`
-       - `installation_id` set to the covering installation ID
-       - All other columns same as public repo flow
+**Admin Detection:**
 
-5. **User messaging**
-   - Success: `"Subscribed private repo owner/repo to this channel."`
-   - Optionally add note: `"Private repo events will be visible to all channel members."`
+- Personal repos: `owner.type == 'User' && owner.login == github_user.login`
+- Org repos: Check `GET /user/memberships/orgs/{owner.login}` for `role == 'admin'`
+- Customize messaging: "You can install..." vs "Ask an admin to install..."
 
-### Upgrading Subscriptions After Installation
+#### 3. Installation Webhook Handler
 
-When the GitHub App is newly installed on an account or additional repos are added:
+**Purpose:** Automatically upgrade subscriptions when app is installed
 
-1. **Installation event processing**
-   - `InstallationService` processes `installation` and `installation_repositories` webhook events
-   - Updates `github_installations` and `installation_repositories` tables
+**Already Implemented** (`InstallationService.upgradeToWebhook()`):
 
-2. **Find affected subscriptions**
-   - After processing an `installation_repositories` `"added"` event for a `repo_full_name`:
-     - Query `github_subscriptions` where:
-       - `repo_full_name` matches the newly added repository
-       - `delivery_mode = 'polling'` (currently using fallback mode)
+- Triggered by `installation.created` and `installation_repositories.added` events
+- Finds subscriptions with `delivery_mode = 'polling'` for the installed repo
+- Updates to `delivery_mode = 'webhook'` and sets `installation_id`
+- Sends notification to affected channels: "🔄 Upgraded owner/repo to real-time webhook delivery!"
 
-3. **Upgrade to webhook mode**
-   - For each matching subscription:
-     - Update the row to:
-       - `delivery_mode = 'webhook'`
-       - `installation_id = <current installation_id>`
-       - `updated_at = <current timestamp>`
+**No changes needed** - this already works correctly.
 
-4. **Notify channels**
-   - Send a message to each affected channel:
-     - `"🔄 Upgraded owner/repo to real-time webhook delivery!"`
-   - This provides immediate feedback that the installation was successful
+### Key Benefits of New Flow
+
+1. **Single OAuth flow:** User only leaves Towns once (vs 2-3 times before)
+2. **Automatic subscription:** Created during OAuth callback (no re-running command)
+3. **Clear upgrade path:** Success page shows installation instructions with countdown
+4. **Security:** OAuth URLs are ephemeral (prevent account hijacking)
+5. **Seamless upgrade:** Installation automatically upgrades to webhooks
 
 ## Configuration
 
@@ -479,6 +506,7 @@ The `/gh_pr` and `/gh_issue` commands use a static bot-level GitHub token, which
 **OAuth-First Approach:** Use the user's personal GitHub OAuth token for private repo access.
 
 The infrastructure already exists:
+
 - `GitHubOAuthService` manages encrypted user tokens
 - `/github subscribe` implements the same OAuth flow pattern
 - `github_user_tokens` table stores tokens with AES-256-GCM encryption
