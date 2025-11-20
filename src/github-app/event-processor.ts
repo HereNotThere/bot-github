@@ -1,4 +1,3 @@
-import { dbService } from "../db";
 import {
   formatPullRequest,
   formatIssue,
@@ -20,6 +19,7 @@ import type {
   DeletePayload,
 } from "../types/webhooks";
 import type { TownsBot } from "../types/bot";
+import type { SubscriptionService } from "../services/subscription-service";
 
 /**
  * EventProcessor - Routes webhook events to formatters and sends to subscribed channels
@@ -28,23 +28,28 @@ import type { TownsBot } from "../types/bot";
  */
 export class EventProcessor {
   private bot: TownsBot;
+  private subscriptionService: SubscriptionService;
 
-  constructor(bot: TownsBot) {
+  constructor(bot: TownsBot, subscriptionService: SubscriptionService) {
     this.bot = bot;
+    this.subscriptionService = subscriptionService;
   }
 
   /**
    * Process a pull request webhook event
    */
-  async processPullRequest(event: PullRequestPayload) {
+  async onPullRequest(event: PullRequestPayload) {
     const { pull_request, repository } = event;
 
     console.log(
       `Processing PR event: ${event.action} - ${repository.full_name}#${pull_request.number}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (pr event type)
     const interestedChannels = channels.filter(ch =>
@@ -79,15 +84,18 @@ export class EventProcessor {
   /**
    * Process a push webhook event (commits)
    */
-  async processPush(event: PushPayload) {
+  async onPush(event: PushPayload) {
     const { repository, ref, commits } = event;
 
     console.log(
       `Processing push event: ${repository.full_name} - ${ref} (${commits?.length || 0} commits)`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (commits event type)
     const interestedChannels = channels.filter(ch =>
@@ -120,15 +128,18 @@ export class EventProcessor {
   /**
    * Process an issues webhook event
    */
-  async processIssues(event: IssuesPayload) {
+  async onIssues(event: IssuesPayload) {
     const { issue, repository } = event;
 
     console.log(
       `Processing issue event: ${event.action} - ${repository.full_name}#${issue.number}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (issues event type)
     const interestedChannels = channels.filter(ch =>
@@ -163,15 +174,18 @@ export class EventProcessor {
   /**
    * Process a release webhook event
    */
-  async processRelease(event: ReleasePayload) {
+  async onRelease(event: ReleasePayload) {
     const { release, repository } = event;
 
     console.log(
       `Processing release event: ${event.action} - ${repository.full_name} ${release.tag_name}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (releases event type)
     const interestedChannels = channels.filter(ch =>
@@ -206,15 +220,18 @@ export class EventProcessor {
   /**
    * Process a workflow run webhook event (CI)
    */
-  async processWorkflowRun(event: WorkflowRunPayload) {
+  async onWorkflowRun(event: WorkflowRunPayload) {
     const { workflow_run, repository } = event;
 
     console.log(
       `Processing workflow run event: ${event.action} - ${repository.full_name} ${workflow_run.name}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (ci event type)
     const interestedChannels = channels.filter(ch =>
@@ -249,15 +266,18 @@ export class EventProcessor {
   /**
    * Process an issue comment webhook event
    */
-  async processIssueComment(event: IssueCommentPayload) {
+  async onIssueComment(event: IssueCommentPayload) {
     const { issue, repository } = event;
 
     console.log(
       `Processing issue comment event: ${event.action} - ${repository.full_name}#${issue.number}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (comments event type)
     const interestedChannels = channels.filter(ch =>
@@ -292,15 +312,18 @@ export class EventProcessor {
   /**
    * Process a pull request review webhook event
    */
-  async processPullRequestReview(event: PullRequestReviewPayload) {
+  async onPullRequestReview(event: PullRequestReviewPayload) {
     const { pull_request, repository } = event;
 
     console.log(
       `Processing PR review event: ${event.action} - ${repository.full_name}#${pull_request.number}`
     );
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (reviews event type)
     const interestedChannels = channels.filter(ch =>
@@ -335,7 +358,7 @@ export class EventProcessor {
   /**
    * Process branch create/delete events
    */
-  async processBranchEvent(
+  async onBranchEvent(
     event: CreatePayload | DeletePayload,
     eventType: "create" | "delete"
   ) {
@@ -343,8 +366,11 @@ export class EventProcessor {
 
     console.log(`Processing ${eventType} event: ${repository.full_name}`);
 
-    // Get subscribed channels for this repo
-    const channels = await dbService.getRepoSubscribers(repository.full_name);
+    // Get subscribed channels for this repo (webhook mode only)
+    const channels = await this.subscriptionService.getRepoSubscribers(
+      repository.full_name,
+      "webhook"
+    );
 
     // Filter by event preferences (branches event type)
     const interestedChannels = channels.filter(ch =>

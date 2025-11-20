@@ -85,6 +85,8 @@ export const githubSubscriptions = pgTable(
       () => githubInstallations.installationId,
       { onDelete: "set null" }
     ),
+    // Note: 'enabled' is reserved for future soft-delete functionality
+    // Currently always true - not used for filtering subscriptions
     enabled: boolean("enabled").notNull().default(true),
     eventTypes: text("event_types").notNull().default(DEFAULT_EVENT_TYPES), // Comma-separated event types
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
@@ -104,10 +106,6 @@ export const githubSubscriptions = pgTable(
     repoIndex: index("idx_github_subscriptions_repo").on(table.repoFullName),
   })
 );
-
-// Temporary alias for backward compatibility with DatabaseService
-// TODO: Remove after SubscriptionService is implemented and DatabaseService is deleted
-export const subscriptions = githubSubscriptions;
 
 /**
  * Stores polling state for each subscribed repository
