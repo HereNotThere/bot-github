@@ -75,7 +75,34 @@ export class InstallationService {
 
     console.log(`GitHub App uninstalled: ${accountLogin} (${installation.id})`);
 
+    // Downgrade subscriptions before deleting installation
+    if (this.subscriptionService) {
+      try {
+        const { downgraded, removed } =
+          await this.subscriptionService.downgradeToPolling(installation.id);
+
+        if (downgraded > 0) {
+          console.log(
+            `Downgraded ${downgraded} subscription(s) from webhook to polling mode`
+          );
+        }
+
+        if (removed > 0) {
+          console.log(
+            `Removed ${removed} private repo subscription(s) (requires app installation)`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `Failed to downgrade subscriptions for installation ${installation.id}:`,
+          error
+        );
+        // Continue with deletion even if downgrade fails
+      }
+    }
+
     // Remove installation (foreign key CASCADE automatically deletes related repositories)
+    // Note: This will also SET NULL on githubSubscriptions.installationId via foreign key
     await db
       .delete(githubInstallations)
       .where(eq(githubInstallations.installationId, installation.id));

@@ -455,6 +455,109 @@ export class SubscriptionService {
   }
 
   /**
+   * Downgrade subscriptions from webhook to polling when GitHub App is uninstalled
+   *
+   * @param installationId - The installation ID that was deleted
+   * @returns Object with counts of downgraded and removed subscriptions
+   */
+  async downgradeToPolling(
+    installationId: number
+  ): Promise<{ downgraded: number; removed: number }> {
+    // Find all subscriptions for this installation
+    const affectedSubs = await db
+      .select({
+        id: githubSubscriptions.id,
+        repoFullName: githubSubscriptions.repoFullName,
+        isPrivate: githubSubscriptions.isPrivate,
+        channelId: githubSubscriptions.channelId,
+      })
+      .from(githubSubscriptions)
+      .where(eq(githubSubscriptions.installationId, installationId));
+
+    if (affectedSubs.length === 0) {
+      return { downgraded: 0, removed: 0 };
+    }
+
+    // Split into public (can downgrade) and private (must remove)
+    const publicRepos = affectedSubs.filter(sub => !sub.isPrivate);
+    const privateRepos = affectedSubs.filter(sub => sub.isPrivate);
+
+    // Downgrade public repos to polling
+    let downgraded = 0;
+    if (publicRepos.length > 0) {
+      const result = await db
+        .update(githubSubscriptions)
+        .set({
+          deliveryMode: "polling",
+          installationId: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(githubSubscriptions.installationId, installationId),
+            eq(githubSubscriptions.isPrivate, false)
+          )
+        )
+        .returning({ id: githubSubscriptions.id });
+
+      downgraded = result.length;
+    }
+
+    // Remove private repo subscriptions (can't poll private repos)
+    let removed = 0;
+    if (privateRepos.length > 0) {
+      const result = await db
+        .delete(githubSubscriptions)
+        .where(
+          and(
+            eq(githubSubscriptions.installationId, installationId),
+            eq(githubSubscriptions.isPrivate, true)
+          )
+        )
+        .returning({ id: githubSubscriptions.id });
+
+      removed = result.length;
+    }
+
+    // Notify affected channels (optional - send Towns messages)
+    if (this.bot) {
+      for (const sub of publicRepos) {
+        try {
+          await this.bot.sendMessage(
+            sub.channelId,
+            `⚠️ GitHub App uninstalled for **${sub.repoFullName}**\n\n` +
+              `Downgraded to polling mode (5-minute intervals). ` +
+              `Reinstall the app for real-time webhooks.`
+          );
+        } catch (error) {
+          console.error(
+            `Failed to notify channel ${sub.channelId} about downgrade:`,
+            error
+          );
+        }
+      }
+
+      for (const sub of privateRepos) {
+        try {
+          await this.bot.sendMessage(
+            sub.channelId,
+            `❌ GitHub App uninstalled for **${sub.repoFullName}**\n\n` +
+              `Subscription removed (private repos require app installation). ` +
+              `Use \`/github subscribe ${sub.repoFullName}\` to re-subscribe after reinstalling.`
+          );
+        } catch (error) {
+          console.error(
+            `Failed to notify channel ${sub.channelId} about removal:`,
+            error
+          );
+        }
+      }
+    }
+
+    return { downgraded, removed };
+  }
+
+  /**
    * Generate GitHub App installation URL
    * @param targetId - Owner ID (user or org), optional
    * @returns Installation URL
