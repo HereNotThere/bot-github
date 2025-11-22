@@ -153,8 +153,7 @@ async function handleSubscribe(
     // Add installation suggestion for public repos
     deliveryInfo =
       "⏱️ Events are checked every 5 minutes (polling mode)\n\n" +
-      `💡 **Want real-time notifications?** Install the GitHub App:\n` +
-      `   [Install GitHub App](${result.installUrl})`;
+      `💡 **Want real-time notifications?** [Install the GitHub App](${result.installUrl})`;
   }
 
   await handler.sendMessage(

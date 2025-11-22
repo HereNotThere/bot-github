@@ -53,7 +53,7 @@ export async function handleOAuthCallback(
           const deliveryInfo =
             subResult.deliveryMode === "webhook"
               ? "⚡ Real-time webhook delivery enabled!"
-              : `⏱️ Events checked every 5 minutes\n\n💡 Install the GitHub App for real-time delivery:\n[Install](<${subResult.installUrl}>)`;
+              : `⏱️ Events checked every 5 minutes\n\n💡 [Install the GitHub App](<${subResult.installUrl}>) for real-time delivery`;
 
           const { eventId } = await bot.sendMessage(
             result.channelId,
