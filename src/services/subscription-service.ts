@@ -486,6 +486,13 @@ export class SubscriptionService {
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
+    if (normalizedNew.length === 0) {
+      return {
+        success: true,
+        eventTypes: subscription.eventTypes,
+      };
+    }
+
     const allowedSet = new Set(ALLOWED_EVENT_TYPES);
     const invalidTypes = normalizedNew.filter(
       t => !allowedSet.has(t as (typeof ALLOWED_EVENT_TYPES)[number])
@@ -560,6 +567,14 @@ export class SubscriptionService {
     const normalizedRemove = typesToRemove
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
+
+    if (normalizedRemove.length === 0) {
+      return {
+        success: true,
+        deleted: false,
+        eventTypes: subscription.eventTypes,
+      };
+    }
 
     // Remove specified types
     const remainingTypes = existingTypes.filter(
