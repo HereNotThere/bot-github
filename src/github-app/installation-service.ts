@@ -143,11 +143,18 @@ export class InstallationService {
       }
 
       // DB miss - check GitHub API as fallback (handles DB out-of-sync scenarios)
-      const [owner, repoName] = repo.split("/");
-      if (!owner || !repoName) {
+      // Validate and parse repo string (must be exactly "owner/repo" format)
+      const normalized = repo.trim();
+      const parts = normalized.split("/");
+
+      if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        console.warn(
+          `[InstallationService] Invalid repo format: "${repo}" (expected "owner/repo")`
+        );
         return null;
       }
 
+      const [owner, repoName] = parts;
       return await this.checkRepoInstallationFromAPI(owner, repoName);
     } catch (error) {
       console.warn(
