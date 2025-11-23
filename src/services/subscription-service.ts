@@ -408,46 +408,50 @@ export class SubscriptionService {
     const publicRepos = affectedSubs.filter(sub => !sub.isPrivate);
     const privateRepos = affectedSubs.filter(sub => sub.isPrivate);
 
-    // Downgrade public repos to polling
+    // Downgrade/remove subscriptions atomically
     let downgraded = 0;
-    if (publicRepos.length > 0) {
-      const publicRepoNames = publicRepos.map(sub => sub.repoFullName);
-      const updateConditions = [
-        eq(githubSubscriptions.installationId, installationId),
-        inArray(githubSubscriptions.repoFullName, publicRepoNames),
-        eq(githubSubscriptions.isPrivate, false),
-      ];
-
-      const result = await db
-        .update(githubSubscriptions)
-        .set({
-          deliveryMode: "polling",
-          installationId: null,
-          updatedAt: new Date(),
-        })
-        .where(and(...updateConditions))
-        .returning({ id: githubSubscriptions.id });
-
-      downgraded = result.length;
-    }
-
-    // Remove private repo subscriptions (can't poll private repos)
     let removed = 0;
-    if (privateRepos.length > 0) {
-      const privateRepoNames = privateRepos.map(sub => sub.repoFullName);
-      const deleteConditions = [
-        eq(githubSubscriptions.installationId, installationId),
-        inArray(githubSubscriptions.repoFullName, privateRepoNames),
-        eq(githubSubscriptions.isPrivate, true),
-      ];
 
-      const result = await db
-        .delete(githubSubscriptions)
-        .where(and(...deleteConditions))
-        .returning({ id: githubSubscriptions.id });
+    await db.transaction(async tx => {
+      // Downgrade public repos to polling
+      if (publicRepos.length > 0) {
+        const publicRepoNames = publicRepos.map(sub => sub.repoFullName);
+        const updateConditions = [
+          eq(githubSubscriptions.installationId, installationId),
+          inArray(githubSubscriptions.repoFullName, publicRepoNames),
+          eq(githubSubscriptions.isPrivate, false),
+        ];
 
-      removed = result.length;
-    }
+        const result = await tx
+          .update(githubSubscriptions)
+          .set({
+            deliveryMode: "polling",
+            installationId: null,
+            updatedAt: new Date(),
+          })
+          .where(and(...updateConditions))
+          .returning({ id: githubSubscriptions.id });
+
+        downgraded = result.length;
+      }
+
+      // Remove private repo subscriptions (can't poll private repos)
+      if (privateRepos.length > 0) {
+        const privateRepoNames = privateRepos.map(sub => sub.repoFullName);
+        const deleteConditions = [
+          eq(githubSubscriptions.installationId, installationId),
+          inArray(githubSubscriptions.repoFullName, privateRepoNames),
+          eq(githubSubscriptions.isPrivate, true),
+        ];
+
+        const result = await tx
+          .delete(githubSubscriptions)
+          .where(and(...deleteConditions))
+          .returning({ id: githubSubscriptions.id });
+
+        removed = result.length;
+      }
+    });
 
     // Notify affected channels (in parallel)
     if (this.bot) {
