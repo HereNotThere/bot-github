@@ -7,7 +7,8 @@ const commands = [
   },
   {
     name: "github",
-    description: "Manage GitHub subscriptions (subscribe, unsubscribe, status)",
+    description:
+      "Manage GitHub subscriptions with granular event filtering (subscribe, unsubscribe, status)",
   },
   {
     name: "gh_pr",
