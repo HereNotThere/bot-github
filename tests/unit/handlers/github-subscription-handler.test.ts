@@ -1,44 +1,84 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import * as githubClient from "../../../src/api/github-client";
 import {
   ALLOWED_EVENT_TYPES,
   DEFAULT_EVENT_TYPES,
 } from "../../../src/constants";
-import { dbService } from "../../../src/db";
 import { handleGithubSubscription } from "../../../src/handlers/github-subscription-handler";
+import { TokenStatus } from "../../../src/services/github-oauth-service";
 import { createMockBotHandler } from "../../fixtures/mock-bot-handler";
 
+// Helper to create test events
+function createTestEvent(overrides: any = {}) {
+  return {
+    channelId: "test-channel",
+    spaceId: "test-space",
+    userId: "0x123",
+    eventId: "test-event",
+    createdAt: new Date(),
+    mentions: [],
+    replyId: undefined,
+    threadId: undefined,
+    args: [],
+    ...overrides,
+  };
+}
+
 describe("github subscription handler", () => {
-  let mockHandler: ReturnType<typeof createMockBotHandler>;
+  let mockHandler: any;
+  let mockSubscriptionService: any;
+  let mockOAuthService: any;
 
   beforeEach(() => {
     mockHandler = createMockBotHandler();
-    mockHandler.sendMessage.mockClear();
+
+    // Mock subscription service
+    mockSubscriptionService = {
+      createSubscription: mock(() =>
+        Promise.resolve({
+          success: true,
+          repoFullName: "owner/repo",
+          deliveryMode: "webhook",
+          installUrl: "https://github.com/apps/test",
+        })
+      ),
+      getChannelSubscriptions: mock(() => Promise.resolve([])),
+      unsubscribe: mock(() => Promise.resolve(true)),
+    };
+
+    // Mock OAuth service
+    mockOAuthService = {
+      validateToken: mock(() => Promise.resolve(TokenStatus.Valid)),
+      getAuthorizationUrl: mock(() =>
+        Promise.resolve("https://github.com/login/oauth/authorize?...")
+      ),
+    };
   });
 
   describe("general", () => {
     test("should send usage message when no action provided", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: [],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: [] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "**Usage:**\n" +
-          `• \`/github subscribe owner/repo [--events all,${ALLOWED_EVENT_TYPES.join(",")}]\` - Subscribe to GitHub events\n` +
-          "• `/github unsubscribe owner/repo` - Unsubscribe from a repository\n" +
-          "• `/github status` - Show current subscriptions"
+      const calls = mockHandler.sendMessage.mock.calls;
+      expect(calls[0][0]).toBe("test-channel");
+      expect(calls[0][1]).toContain(
+        `all,${ALLOWED_EVENT_TYPES.join(",")}`
       );
     });
 
     test("should send error for unknown action", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unknown"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unknown"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
       const message = mockHandler.sendMessage.mock.calls[0][1];
@@ -50,511 +90,506 @@ describe("github subscription handler", () => {
     });
 
     test("should handle case-insensitive actions - subscribe", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["SUBSCRIBE", "owner/repo"],
-      });
-
-      expect(validateRepoSpy).toHaveBeenCalledWith("owner/repo");
-      expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
-      const message = mockHandler.sendMessage.mock.calls[0][1];
-      expect(message).toContain(
-        "✅ **Subscribed to [owner/repo](https://github.com/owner/repo)**"
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["SUBSCRIBE", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("✅ **Subscribed");
     });
 
     test("should handle case-insensitive actions - unsubscribe", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
-      const unsubscribeSpy = spyOn(dbService, "unsubscribe").mockResolvedValue(
-        true
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
       );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["UNSUBSCRIBE", "owner/repo"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "✅ **Unsubscribed from owner/repo**"
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["UNSUBSCRIBE", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      getChannelSubscriptionsSpy.mockRestore();
-      unsubscribeSpy.mockRestore();
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("✅ **Unsubscribed from owner/repo**");
     });
 
     test("should handle case-insensitive actions - status", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["STATUS"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["STATUS"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       const message = mockHandler.sendMessage.mock.calls[0][1];
       expect(message).toContain("📬 **Subscribed Repositories (1):**");
-      expect(message).toContain("• owner/repo");
-
-      getChannelSubscriptionsSpy.mockRestore();
+      expect(message).toContain("owner/repo");
     });
   });
 
   describe("subscribe action", () => {
     test("should send error for missing repo argument", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        `❌ Usage: \`/github subscribe owner/repo [--events all,${ALLOWED_EVENT_TYPES.join(",")}]\``
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain(
+        `all,${ALLOWED_EVENT_TYPES.join(",")}`
       );
     });
 
     test("should send error for invalid repo format (no slash)", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "invalidrepo"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "invalidrepo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)"
-      );
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Invalid format");
     });
 
     test("should send error for invalid repo format (multiple slashes)", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/repo/extra"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo/extra"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)"
-      );
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Invalid format");
     });
 
-    test("should send error when repo doesn't exist (validateRepo fails)", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(false);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/nonexistent"],
-      });
-
-      expect(validateRepoSpy).toHaveBeenCalledWith("owner/nonexistent");
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Repository **owner/nonexistent** not found or is not public"
+    test("should successfully subscribe with default event types", async () => {
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "facebook/react"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-    });
-
-    test("should successfully subscribe to valid repo with default event types", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
-
-      await handleGithubSubscription(mockHandler, {
+      const createCalls = mockSubscriptionService.createSubscription.mock.calls;
+      expect(createCalls.length).toBe(1);
+      expect(createCalls[0][0]).toEqual({
+        townsUserId: "0x123",
+        spaceId: "test-space",
         channelId: "test-channel",
-        args: ["subscribe", "facebook/react"],
+        repoIdentifier: "facebook/react",
+        eventTypes: DEFAULT_EVENT_TYPES,
       });
-
-      expect(validateRepoSpy).toHaveBeenCalledWith("facebook/react");
-      expect(subscribeSpy).toHaveBeenCalledWith(
-        "test-channel",
-        "facebook/react",
-        DEFAULT_EVENT_TYPES
-      );
-      expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
 
       const message = mockHandler.sendMessage.mock.calls[0][1];
-      expect(message).toContain(
-        "✅ **Subscribed to [facebook/react](https://github.com/facebook/react)**"
-      );
-      expect(message).toContain(DEFAULT_EVENT_TYPES.replace(/,/g, ", "));
-
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      expect(message).toContain("✅ **Subscribed");
     });
 
     test("should handle custom event types with --events flag", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/repo", "--events", "pr,ci"],
-      });
-
-      expect(subscribeSpy).toHaveBeenCalledWith(
-        "test-channel",
-        "owner/repo",
-        "pr,ci"
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({
+          args: ["subscribe", "owner/repo", "--events", "pr,ci"],
+        }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      const message = mockHandler.sendMessage.mock.calls[0][1];
-      expect(message).toContain("pr, ci");
-
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      const createCalls = mockSubscriptionService.createSubscription.mock.calls;
+      expect(createCalls[0][0].eventTypes).toBe("pr,ci");
     });
 
     test("should handle --events=all flag", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/repo", "--events=all"],
-      });
-
-      expect(subscribeSpy).toHaveBeenCalledWith(
-        "test-channel",
-        "owner/repo",
-        ALLOWED_EVENT_TYPES.join(",")
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({
+          args: ["subscribe", "owner/repo", "--events=all"],
+        }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      const createCalls = mockSubscriptionService.createSubscription.mock.calls;
+      expect(createCalls[0][0].eventTypes).toBe(ALLOWED_EVENT_TYPES.join(","));
     });
 
     test("should reject invalid event types", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/repo", "--events", "pr,invalid"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({
+          args: ["subscribe", "owner/repo", "--events", "pr,invalid"],
+        }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       const message = mockHandler.sendMessage.mock.calls[0][1];
       expect(message).toContain("❌ Invalid event type(s): 'invalid'");
     });
 
-    test("should send info message when already subscribed", async () => {
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(true);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "owner/repo"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "ℹ️ Already subscribed to **owner/repo**"
+    test("should handle token not linked error", async () => {
+      mockOAuthService.validateToken = mock(() =>
+        Promise.resolve(TokenStatus.NotLinked)
       );
 
-      isSubscribedSpy.mockRestore();
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      // Should call getAuthorizationUrl for OAuth flow
+      expect(mockOAuthService.getAuthorizationUrl).toHaveBeenCalled();
+    });
+
+    test("should handle token expired error", async () => {
+      mockOAuthService.validateToken = mock(() =>
+        Promise.resolve(TokenStatus.Invalid)
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      // Should call getAuthorizationUrl for OAuth flow
+      expect(mockOAuthService.getAuthorizationUrl).toHaveBeenCalled();
+    });
+
+    test("should handle token unknown error", async () => {
+      mockOAuthService.validateToken = mock(() =>
+        Promise.resolve(TokenStatus.Unknown)
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("⚠️ **Unable to Verify GitHub Connection**");
+    });
+
+    test("should handle installation required error", async () => {
+      mockSubscriptionService.createSubscription = mock(() =>
+        Promise.resolve({
+          success: false,
+          requiresInstallation: true,
+          error: "Private repository requires GitHub App installation",
+          installUrl: "https://github.com/apps/test/installations/new",
+        })
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("🔒 **GitHub App Installation Required**");
+    });
+
+    test("should handle generic subscription error", async () => {
+      mockSubscriptionService.createSubscription = mock(() =>
+        Promise.resolve({
+          success: false,
+          error: "Repository not found",
+        })
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Repository not found");
+    });
+
+    test("should handle polling mode delivery", async () => {
+      mockSubscriptionService.createSubscription = mock(() =>
+        Promise.resolve({
+          success: true,
+          repoFullName: "owner/repo",
+          deliveryMode: "polling",
+          installUrl: "https://github.com/apps/test/installations/new",
+        })
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("⏱️ Events are checked every 5 minutes");
+    });
+
+    test("should send info message when already subscribed", async () => {
+      mockSubscriptionService.createSubscription = mock(() =>
+        Promise.resolve({
+          success: false,
+          requiresInstallation: false,
+          error: "Already subscribed to owner/repo",
+        })
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("Already subscribed");
     });
 
     test("should strip markdown from repo name", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "**owner/repo**"],
-      });
-
-      // Should call validateRepo with stripped name
-      expect(validateRepoSpy).toHaveBeenCalledWith("owner/repo");
-      expect(subscribeSpy).toHaveBeenCalledWith(
-        "test-channel",
-        "owner/repo",
-        DEFAULT_EVENT_TYPES
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "**owner/repo**"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      const createCalls = mockSubscriptionService.createSubscription.mock.calls;
+      expect(createCalls.length).toBe(1);
+      expect(createCalls[0][0].repoIdentifier).toBe("owner/repo");
     });
 
     test("should strip various markdown formats from repo name", async () => {
-      const validateRepoSpy = spyOn(
-        githubClient,
-        "validateRepo"
-      ).mockResolvedValue(true);
-      const isSubscribedSpy = spyOn(
-        dbService,
-        "isSubscribed"
-      ).mockResolvedValue(false);
-      const subscribeSpy = spyOn(dbService, "subscribe").mockResolvedValue();
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["subscribe", "`owner/repo`"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["subscribe", "`owner/repo`"],
-      });
-
-      expect(validateRepoSpy).toHaveBeenCalledWith("owner/repo");
-
-      validateRepoSpy.mockRestore();
-      isSubscribedSpy.mockRestore();
-      subscribeSpy.mockRestore();
+      const createCalls = mockSubscriptionService.createSubscription.mock.calls;
+      expect(createCalls[0][0].repoIdentifier).toBe("owner/repo");
     });
   });
 
   describe("unsubscribe action", () => {
     test("should send error for missing repo argument", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Usage: `/github unsubscribe owner/repo`"
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Usage: `/github unsubscribe");
     });
 
-    test("should send error for invalid repo format (no slash)", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "invalidrepo"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)"
+    test("should send error for invalid repo format", async () => {
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "invalidrepo"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
-    });
 
-    test("should send error for invalid repo format (multiple slashes)", async () => {
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "owner/repo/extra"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ Invalid format. Use: `owner/repo` (e.g., `facebook/react`)"
-      );
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Invalid format");
     });
 
     test("should send error when channel has no subscriptions", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([]);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "owner/repo"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "❌ This channel has no subscriptions"
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([])
       );
 
-      getChannelSubscriptionsSpy.mockRestore();
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ This channel has no subscriptions");
     });
 
-    test("should send error when not subscribed to specified repo", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "owner/other", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
+    test("should send error when not subscribed to repo", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "other/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "owner/repo"],
-      });
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
 
       const message = mockHandler.sendMessage.mock.calls[0][1];
       expect(message).toContain("❌ Not subscribed to **owner/repo**");
-      expect(message).toContain(
-        "Use `/github status` to see your subscriptions"
-      );
-
-      getChannelSubscriptionsSpy.mockRestore();
     });
 
-    test("should successfully unsubscribe from specific repo", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
-      const unsubscribeSpy = spyOn(dbService, "unsubscribe").mockResolvedValue(
-        true
+    test("should successfully unsubscribe from repo", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
+      mockSubscriptionService.unsubscribe = mock(() => Promise.resolve(true));
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "owner/repo"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
+      const unsubCalls = mockSubscriptionService.unsubscribe.mock.calls;
+      expect(unsubCalls.length).toBe(1);
+      expect(unsubCalls[0]).toEqual([
         "test-channel",
-        "✅ **Unsubscribed from owner/repo**"
+        "test-space",
+        "owner/repo",
+      ]);
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("✅ **Unsubscribed from owner/repo**");
+    });
+
+    test("should handle case-insensitive repo names", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
+      mockSubscriptionService.unsubscribe = mock(() => Promise.resolve(true));
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "OWNER/REPO"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      getChannelSubscriptionsSpy.mockRestore();
-      unsubscribeSpy.mockRestore();
+      const unsubCalls = mockSubscriptionService.unsubscribe.mock.calls;
+      expect(unsubCalls[0][2]).toBe("owner/repo");
+    });
+
+    test("should handle unsubscribe failure", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
+      mockSubscriptionService.unsubscribe = mock(() => Promise.resolve(false));
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "owner/repo"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("❌ Failed to unsubscribe");
     });
 
     test("should strip markdown from repo name", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
-      const unsubscribeSpy = spyOn(dbService, "unsubscribe").mockResolvedValue(
-        true
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          { repo: "owner/repo", eventTypes: DEFAULT_EVENT_TYPES },
+        ])
+      );
+      mockSubscriptionService.unsubscribe = mock(() => Promise.resolve(true));
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["unsubscribe", "**owner/repo**"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
 
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["unsubscribe", "**owner/repo**"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "✅ **Unsubscribed from owner/repo**"
-      );
-
-      getChannelSubscriptionsSpy.mockRestore();
-      unsubscribeSpy.mockRestore();
+      const unsubCalls = mockSubscriptionService.unsubscribe.mock.calls;
+      expect(unsubCalls.length).toBe(1);
+      expect(unsubCalls[0][2]).toBe("owner/repo");
     });
   });
 
   describe("status action", () => {
-    test("should show 'No subscriptions' when channel has no repos", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([]);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["status"],
-      });
-
-      expect(mockHandler.sendMessage).toHaveBeenCalledWith(
-        "test-channel",
-        "📭 **No subscriptions**\n\nUse `/github subscribe owner/repo` to get started"
+    test("should send message when no subscriptions", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([])
       );
 
-      getChannelSubscriptionsSpy.mockRestore();
-    });
-
-    test("should list all subscribed repos", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "facebook/react", eventTypes: DEFAULT_EVENT_TYPES },
-      ]);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["status"],
-      });
-
-      const message = mockHandler.sendMessage.mock.calls[0][1];
-      expect(message).toContain("📬 **Subscribed Repositories (1):**");
-      expect(message).toContain("• facebook/react");
-
-      getChannelSubscriptionsSpy.mockRestore();
-    });
-
-    test("should format multiple repos correctly", async () => {
-      const getChannelSubscriptionsSpy = spyOn(
-        dbService,
-        "getChannelSubscriptions"
-      ).mockResolvedValue([
-        { repo: "facebook/react", eventTypes: DEFAULT_EVENT_TYPES },
-        { repo: "microsoft/vscode", eventTypes: "pr,ci" },
-        { repo: "vercel/next.js", eventTypes: "all" },
-      ]);
-
-      await handleGithubSubscription(mockHandler, {
-        channelId: "test-channel",
-        args: ["status"],
-      });
-
-      const message = mockHandler.sendMessage.mock.calls[0][1];
-      expect(message).toContain("📬 **Subscribed Repositories (3):**");
-      expect(message).toContain(
-        `• facebook/react (${DEFAULT_EVENT_TYPES.replace(/,/g, ", ")})`
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["status"] }),
+        mockSubscriptionService,
+        mockOAuthService
       );
-      expect(message).toContain("• microsoft/vscode (pr, ci)");
-      expect(message).toContain("• vercel/next.js (all)");
 
-      getChannelSubscriptionsSpy.mockRestore();
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("📭 **No subscriptions**");
+    });
+
+    test("should list all subscriptions", async () => {
+      mockSubscriptionService.getChannelSubscriptions = mock(() =>
+        Promise.resolve([
+          {
+            repo: "owner/repo1",
+            eventTypes: DEFAULT_EVENT_TYPES,
+            deliveryMode: "webhook",
+          },
+          {
+            repo: "owner/repo2",
+            eventTypes: "pr,ci",
+            deliveryMode: "polling",
+          },
+        ])
+      );
+
+      await handleGithubSubscription(
+        mockHandler,
+        createTestEvent({ args: ["status"] }),
+        mockSubscriptionService,
+        mockOAuthService
+      );
+
+      const message = mockHandler.sendMessage.mock.calls[0][1];
+      expect(message).toContain("📬 **Subscribed Repositories (2):**");
+      expect(message).toContain("owner/repo1");
+      expect(message).toContain("owner/repo2");
     });
   });
 });
