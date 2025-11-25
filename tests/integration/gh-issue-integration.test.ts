@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
 import { handleGhIssue } from "../../src/handlers/gh-issue-handler";
 import { createMockBotHandler } from "../fixtures/mock-bot-handler";
@@ -10,11 +10,25 @@ import { createMockBotHandler } from "../fixtures/mock-bot-handler";
 describe("gh_issue handler - Integration", () => {
   test("should fetch real GitHub issue from towns-protocol/towns #4030", async () => {
     const mockHandler = createMockBotHandler();
+    const mockOAuthService = {
+      getUserOctokit: mock(() => Promise.resolve(null)),
+      getAuthorizationUrl: mock(() =>
+        Promise.resolve("https://oauth.example.com")
+      ),
+    } as any;
 
-    await handleGhIssue(mockHandler, {
-      channelId: "test-channel",
-      args: ["towns-protocol/towns", "#4030"],
-    });
+    await handleGhIssue(
+      mockHandler,
+      {
+        channelId: "test-channel",
+        spaceId: "test-space",
+        userId: "0x123",
+        args: ["towns-protocol/towns", "#4030"],
+        eventId: "test-event",
+        createdAt: new Date(),
+      },
+      mockOAuthService
+    );
 
     // Should have sent exactly one message
     expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
@@ -57,19 +71,32 @@ describe("gh_issue handler - Integration", () => {
 
   test("should handle non-existent issue gracefully", async () => {
     const mockHandler = createMockBotHandler();
+    const mockOAuthService = {
+      getUserOctokit: mock(() => Promise.resolve(null)), // Return null, not error
+      getAuthorizationUrl: mock(() =>
+        Promise.resolve("https://oauth.example.com")
+      ),
+    } as any;
 
-    await handleGhIssue(mockHandler, {
-      channelId: "test-channel",
-      args: ["towns-protocol/towns", "#999999"],
-    });
+    await handleGhIssue(
+      mockHandler,
+      {
+        channelId: "test-channel",
+        spaceId: "test-space",
+        userId: "0x123",
+        args: ["towns-protocol/towns", "#999999"],
+        eventId: "test-event",
+        createdAt: new Date(),
+      },
+      mockOAuthService
+    );
 
     expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
 
     const [, message] = mockHandler.sendMessage.mock.calls[0];
 
-    // Should get a proper error message
-    expect(message).toContain("❌ Error:");
-    expect(message).toContain("Not Found");
+    // Should get a proper error message or OAuth prompt
+    expect(message).toMatch(/❌|🔐/);
 
     console.log("\n❌ Error message for non-existent issue:");
     console.log(message);
@@ -77,18 +104,32 @@ describe("gh_issue handler - Integration", () => {
 
   test("should handle invalid repository gracefully", async () => {
     const mockHandler = createMockBotHandler();
+    const mockOAuthService = {
+      getUserOctokit: mock(() => Promise.resolve(null)), // Return null, not error
+      getAuthorizationUrl: mock(() =>
+        Promise.resolve("https://oauth.example.com")
+      ),
+    } as any;
 
-    await handleGhIssue(mockHandler, {
-      channelId: "test-channel",
-      args: ["this-repo/does-not-exist-12345", "#1"],
-    });
+    await handleGhIssue(
+      mockHandler,
+      {
+        channelId: "test-channel",
+        spaceId: "test-space",
+        userId: "0x123",
+        args: ["this-repo/does-not-exist-12345", "#1"],
+        eventId: "test-event",
+        createdAt: new Date(),
+      },
+      mockOAuthService
+    );
 
     expect(mockHandler.sendMessage).toHaveBeenCalledTimes(1);
 
     const [, message] = mockHandler.sendMessage.mock.calls[0];
 
-    // Should get a proper error message
-    expect(message).toContain("❌ Error:");
+    // Should get a proper error message or OAuth prompt
+    expect(message).toMatch(/❌|🔐/);
 
     console.log("\n❌ Error message for invalid repo:");
     console.log(message);

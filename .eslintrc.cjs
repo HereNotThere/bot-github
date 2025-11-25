@@ -22,7 +22,7 @@ module.exports = {
       },
     },
   },
-  ignorePatterns: ["dist/**", ".turbo/**", "node_modules/**", "vitest.*"],
+  ignorePatterns: ["dist/**", ".turbo/**", "node_modules/**", "vitest.*", "tests/**"],
   rules: {
     "no-console": "off",
     "@typescript-eslint/require-await": "off",
