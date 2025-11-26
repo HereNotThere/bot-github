@@ -13,13 +13,14 @@ import { db } from "../db";
 import { githubUserTokens, oauthStates } from "../db/schema";
 import { GitHubApp } from "../github-app/app";
 
-/**
- * Redirect data for subscription action
- */
-export interface SubscriptionRedirectData {
+/** Supported redirect actions after OAuth completion */
+export type RedirectAction = "subscribe" | "query";
+
+/** Redirect data passed through OAuth state */
+export interface RedirectData {
   repo: string;
-  eventTypes?: string;
-  messageEventId?: string; // Optional eventId for editing OAuth prompt message
+  eventTypes?: string; // Only used by "subscribe" action
+  messageEventId?: string; // Populated by sendEditableOAuthPrompt
 }
 
 /**
@@ -29,8 +30,8 @@ export interface OAuthCallbackResult {
   townsUserId: string;
   channelId: string;
   spaceId: string | null;
-  redirectAction: string | null;
-  redirectData: SubscriptionRedirectData | null;
+  redirectAction: RedirectAction | null;
+  redirectData: RedirectData | null;
   githubLogin: string;
 }
 
@@ -111,8 +112,8 @@ export class GitHubOAuthService {
     townsUserId: string,
     channelId: string,
     spaceId: string,
-    redirectAction?: string,
-    redirectData?: SubscriptionRedirectData
+    redirectAction?: RedirectAction,
+    redirectData?: RedirectData
   ): Promise<string> {
     // Generate secure state token
     const state = randomBytes(32).toString("hex");
@@ -196,6 +197,12 @@ export class GitHubOAuthService {
       ? this.encryptToken(authentication.refreshToken)
       : null;
 
+    // Auto-transfer: If this GitHub account is linked to a different Towns user, remove that link first
+    // This allows the same GitHub account to be re-linked to a new Towns user
+    await db
+      .delete(githubUserTokens)
+      .where(eq(githubUserTokens.githubUserId, user.id));
+
     // Store or update user token
     const now = new Date();
     await db
@@ -242,9 +249,9 @@ export class GitHubOAuthService {
       townsUserId: stateData.townsUserId,
       channelId: stateData.channelId,
       spaceId: stateData.spaceId,
-      redirectAction: stateData.redirectAction,
+      redirectAction: stateData.redirectAction as RedirectAction | null,
       redirectData: stateData.redirectData
-        ? JSON.parse(stateData.redirectData)
+        ? (JSON.parse(stateData.redirectData) as RedirectData)
         : null,
       githubLogin: user.login,
     };
