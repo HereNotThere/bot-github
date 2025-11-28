@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import type { BotHandler } from "@towns-protocol/bot";
 
 import { getOwnerIdFromUsername } from "../api/github-client";
 import {
@@ -8,7 +9,7 @@ import {
   type UserProfile,
 } from "../api/user-oauth-client";
 import {
-  DEFAULT_EVENT_TYPES,
+  DEFAULT_EVENT_TYPES_ARRAY,
   PENDING_MESSAGE_CLEANUP_INTERVAL_MS,
   PENDING_MESSAGE_MAX_AGE_MS,
   PENDING_SUBSCRIPTION_CLEANUP_INTERVAL_MS,
@@ -17,6 +18,10 @@ import {
 } from "../constants";
 import { db } from "../db";
 import { githubSubscriptions, pendingSubscriptions } from "../db/schema";
+import {
+  formatDeliveryInfo,
+  formatSubscriptionSuccess,
+} from "../formatters/subscription-messages";
 import {
   generateInstallUrl,
   InstallationService,
@@ -107,15 +112,8 @@ export class SubscriptionService {
     const { townsUserId, spaceId, channelId, repoIdentifier, eventTypes } =
       params;
 
-    // Parse owner/repo
+    // Parse owner/repo (caller validates format)
     const [owner, repo] = repoIdentifier.split("/");
-    if (!owner || !repo) {
-      return {
-        success: false,
-        requiresInstallation: false,
-        error: `Invalid repository format. Use: owner/repo`,
-      };
-    }
 
     // 1. Get OAuth token (assumes caller has checked OAuth is linked)
     const githubToken = await this.oauthService.getToken(townsUserId);
@@ -369,7 +367,7 @@ export class SubscriptionService {
           spaceId: sub.spaceId,
           channelId: sub.channelId,
           repoIdentifier: repoFullName,
-          eventTypes: sub.eventTypes.split(",") as EventType[],
+          eventTypes: parseEventTypes(sub.eventTypes),
         });
 
         if (result.success && this.bot) {
@@ -446,9 +444,7 @@ export class SubscriptionService {
 
     return results.map(r => ({
       repo: r.repo,
-      eventTypes: (r.eventTypes || DEFAULT_EVENT_TYPES).split(
-        ","
-      ) as EventType[],
+      eventTypes: parseEventTypes(r.eventTypes),
       deliveryMode: r.deliveryMode,
     }));
   }
@@ -481,9 +477,7 @@ export class SubscriptionService {
 
     return results.map(r => ({
       channelId: r.channelId,
-      eventTypes: (r.eventTypes || DEFAULT_EVENT_TYPES).split(
-        ","
-      ) as EventType[],
+      eventTypes: parseEventTypes(r.eventTypes),
     }));
   }
 
@@ -696,6 +690,31 @@ export class SubscriptionService {
   }
 
   /**
+   * Send subscription success message and register pending message for polling mode
+   */
+  async sendSubscriptionSuccess(
+    result: Extract<SubscribeResult, { success: true }>,
+    eventTypes: EventType[],
+    channelId: string,
+    sender: Pick<BotHandler, "sendMessage">
+  ): Promise<void> {
+    const installUrl =
+      result.deliveryMode === "polling" ? result.installUrl : undefined;
+    const deliveryInfo = formatDeliveryInfo(result.deliveryMode, installUrl);
+    const message = formatSubscriptionSuccess(
+      result.repoFullName,
+      eventTypes,
+      deliveryInfo
+    );
+
+    const { eventId } = await sender.sendMessage(channelId, message);
+
+    if (result.deliveryMode === "polling" && eventId) {
+      this.registerPendingMessage(channelId, result.repoFullName, eventId);
+    }
+  }
+
+  /**
    * Register a pending subscription message for later updates
    */
   registerPendingMessage(
@@ -748,4 +767,244 @@ export class SubscriptionService {
       );
     }
   }
+
+  /**
+   * Get a specific subscription
+   */
+  async getSubscription(
+    spaceId: string,
+    channelId: string,
+    repoFullName: string
+  ): Promise<{
+    id: number;
+    eventTypes: EventType[];
+    deliveryMode: string;
+    createdByTownsUserId: string;
+  } | null> {
+    const results = await db
+      .select({
+        id: githubSubscriptions.id,
+        eventTypes: githubSubscriptions.eventTypes,
+        deliveryMode: githubSubscriptions.deliveryMode,
+        createdByTownsUserId: githubSubscriptions.createdByTownsUserId,
+      })
+      .from(githubSubscriptions)
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      )
+      .limit(1);
+
+    if (!results[0]) return null;
+
+    return {
+      ...results[0],
+      eventTypes: parseEventTypes(results[0].eventTypes),
+    };
+  }
+
+  /**
+   * Add event types to an existing subscription
+   * Validates repo access using the user's OAuth token
+   * Returns the updated event types array
+   */
+  async addEventTypes(
+    townsUserId: string,
+    spaceId: string,
+    channelId: string,
+    repoFullName: string,
+    newEventTypes: EventType[]
+  ): Promise<{ success: boolean; eventTypes?: EventType[]; error?: string }> {
+    // 1. Get OAuth token (assumes caller has checked OAuth is linked)
+    const githubToken = await this.oauthService.getToken(townsUserId);
+    if (!githubToken) {
+      throw new Error(
+        "OAuth token not found. Caller should check OAuth status before calling addEventTypes."
+      );
+    }
+
+    // 2. Validate repo access
+    const [owner, repo] = repoFullName.split("/");
+    try {
+      await validateRepository(githubToken, owner, repo);
+    } catch {
+      return {
+        success: false,
+        error: "You don't have access to this repository",
+      };
+    }
+
+    // 3. Check subscription exists
+    const subscription = await this.getSubscription(
+      spaceId,
+      channelId,
+      repoFullName
+    );
+
+    if (!subscription) {
+      return {
+        success: false,
+        error: `Not subscribed to ${repoFullName}`,
+      };
+    }
+
+    if (newEventTypes.length === 0) {
+      return {
+        success: true,
+        eventTypes: subscription.eventTypes,
+      };
+    }
+
+    // Merge and deduplicate
+    const mergedTypes = [
+      ...new Set([...subscription.eventTypes, ...newEventTypes]),
+    ] as EventType[];
+
+    // Update subscription
+    const result = await db
+      .update(githubSubscriptions)
+      .set({
+        eventTypes: mergedTypes.join(","),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      )
+      .returning({ id: githubSubscriptions.id });
+
+    if (result.length === 0) {
+      return {
+        success: false,
+        error: `Subscription no longer exists for ${repoFullName}`,
+      };
+    }
+
+    return {
+      success: true,
+      eventTypes: mergedTypes,
+    };
+  }
+
+  /**
+   * Remove event types from an existing subscription
+   * Validates repo access using the user's OAuth token
+   * If all event types are removed, deletes the subscription entirely
+   * Returns whether the subscription still exists and the updated event types
+   */
+  async removeEventTypes(
+    townsUserId: string,
+    spaceId: string,
+    channelId: string,
+    repoFullName: string,
+    typesToRemove: EventType[]
+  ): Promise<{
+    success: boolean;
+    deleted?: boolean;
+    eventTypes?: EventType[];
+    error?: string;
+  }> {
+    // 1. Get OAuth token (assumes caller has checked OAuth is linked)
+    const githubToken = await this.oauthService.getToken(townsUserId);
+    if (!githubToken) {
+      throw new Error(
+        "OAuth token not found. Caller should check OAuth status before calling removeEventTypes."
+      );
+    }
+
+    // 2. Validate repo access
+    const [owner, repo] = repoFullName.split("/");
+    try {
+      await validateRepository(githubToken, owner, repo);
+    } catch {
+      return {
+        success: false,
+        error: "You don't have access to this repository",
+      };
+    }
+
+    // 3. Check subscription exists
+    const subscription = await this.getSubscription(
+      spaceId,
+      channelId,
+      repoFullName
+    );
+
+    if (!subscription) {
+      return {
+        success: false,
+        error: `Not subscribed to ${repoFullName}`,
+      };
+    }
+
+    if (typesToRemove.length === 0) {
+      return {
+        success: true,
+        deleted: false,
+        eventTypes: subscription.eventTypes,
+      };
+    }
+
+    // Remove specified types
+    const remainingTypes = subscription.eventTypes.filter(
+      t => !typesToRemove.includes(t)
+    );
+
+    // If no types remain, delete the subscription
+    if (remainingTypes.length === 0) {
+      const deleted = await this.unsubscribe(channelId, spaceId, repoFullName);
+      if (!deleted) {
+        return {
+          success: false,
+          error: `Failed to delete subscription for ${repoFullName}`,
+        };
+      }
+      return {
+        success: true,
+        deleted: true,
+      };
+    }
+
+    // Update subscription with remaining types
+    const result = await db
+      .update(githubSubscriptions)
+      .set({
+        eventTypes: remainingTypes.join(","),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(githubSubscriptions.spaceId, spaceId),
+          eq(githubSubscriptions.channelId, channelId),
+          eq(githubSubscriptions.repoFullName, repoFullName)
+        )
+      )
+      .returning({ id: githubSubscriptions.id });
+
+    if (result.length === 0) {
+      return {
+        success: false,
+        error: `Subscription no longer exists for ${repoFullName}`,
+      };
+    }
+
+    return {
+      success: true,
+      deleted: false,
+      eventTypes: remainingTypes,
+    };
+  }
+}
+
+/** Parse DB event types string to EventType[] */
+function parseEventTypes(eventTypes: string | null): EventType[] {
+  return eventTypes
+    ? (eventTypes.split(",") as EventType[])
+    : [...DEFAULT_EVENT_TYPES_ARRAY];
 }
