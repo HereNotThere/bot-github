@@ -18,6 +18,8 @@ export type ReleasePayload = WebhookPayload<"release">;
 export type WorkflowRunPayload = WebhookPayload<"workflow_run">;
 export type IssueCommentPayload = WebhookPayload<"issue_comment">;
 export type PullRequestReviewPayload = WebhookPayload<"pull_request_review">;
+export type PullRequestReviewCommentPayload =
+  WebhookPayload<"pull_request_review_comment">;
 export type InstallationPayload = WebhookPayload<"installation">;
 export type InstallationRepositoriesPayload =
   WebhookPayload<"installation_repositories">;

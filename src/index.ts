@@ -103,6 +103,10 @@ githubApp.webhooks.on("pull_request_review", async ({ payload }) => {
   await eventProcessor.onPullRequestReview(payload);
 });
 
+githubApp.webhooks.on("pull_request_review_comment", async ({ payload }) => {
+  await eventProcessor.onPullRequestReviewComment(payload);
+});
+
 githubApp.webhooks.on("create", async ({ payload }) => {
   await eventProcessor.onBranchEvent(payload, "create");
 });
