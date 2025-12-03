@@ -10,6 +10,7 @@ import type {
   IssueCommentPayload,
   IssuesPayload,
   PullRequestPayload,
+  PullRequestReviewCommentPayload,
   PullRequestReviewPayload,
   PushPayload,
   ReleasePayload,
@@ -173,6 +174,26 @@ export function formatPullRequestReview(
       `**${pull_request.title}**\n` +
       `👤 ${review.user?.login || "unknown"}\n` +
       `🔗 ${review.html_url}`
+    );
+  }
+
+  return "";
+}
+
+export function formatPullRequestReviewComment(
+  payload: PullRequestReviewCommentPayload
+): string {
+  const { action, comment, pull_request, repository } = payload;
+
+  if (action === "created") {
+    const shortComment = comment.body.split("\n")[0].substring(0, 100);
+
+    return (
+      `💬 **Review Comment on PR #${pull_request.number}**\n` +
+      `**${repository.full_name}**\n\n` +
+      `"${shortComment}${comment.body.length > 100 ? "..." : ""}"\n` +
+      `👤 ${comment.user?.login || "unknown"}\n` +
+      `🔗 ${comment.html_url}`
     );
   }
 

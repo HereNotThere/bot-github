@@ -9,6 +9,7 @@ import {
   formatIssueComment,
   formatPullRequest,
   formatPullRequestReview,
+  formatPullRequestReviewComment,
   formatPush,
   formatRelease,
   formatWatch,
@@ -26,6 +27,7 @@ import type {
   IssueCommentPayload,
   IssuesPayload,
   PullRequestPayload,
+  PullRequestReviewCommentPayload,
   PullRequestReviewPayload,
   PushPayload,
   ReleasePayload,
@@ -228,6 +230,22 @@ export class EventProcessor {
       "reviews",
       formatPullRequestReview,
       `PR review event: ${event.action} - ${repository.full_name}#${pull_request.number}`,
+      { branch: baseBranch }
+    );
+  }
+
+  /**
+   * Process a pull request review comment webhook event
+   * Branch filter applies to the PR's base branch (merge target)
+   */
+  async onPullRequestReviewComment(event: PullRequestReviewCommentPayload) {
+    const { pull_request, repository } = event;
+    const baseBranch = pull_request.base.ref;
+    await this.processEvent(
+      event,
+      "review_comments",
+      formatPullRequestReviewComment,
+      `PR review comment event: ${event.action} - ${repository.full_name}#${pull_request.number}`,
       { branch: baseBranch }
     );
   }
