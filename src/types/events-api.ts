@@ -6,49 +6,7 @@
  */
 
 import type { Endpoints } from "@octokit/types";
-import { emitterEventNames } from "@octokit/webhooks";
 import { z } from "zod";
-
-/** All webhook event names from \@octokit/webhooks */
-type WebhookEventName = (typeof emitterEventNames)[number];
-
-/** Extract action union from webhook event names (compile-time, inspectable) */
-type ActionsFor<TPrefix extends string> = WebhookEventName extends infer E
-  ? E extends `${TPrefix}.${infer Action}`
-    ? Action
-    : never
-  : never;
-
-/** Extract actions array at runtime (needed for Zod) */
-const actionsFor = <T extends string>(prefix: T): ActionsFor<T>[] => {
-  const prefixDot = `${prefix}.`;
-  return emitterEventNames
-    .filter(n => n.startsWith(prefixDot))
-    .map(n => n.slice(prefixDot.length)) as ActionsFor<T>[];
-};
-
-/** Inspectable action types - hover to see union */
-export type PullRequestAction = ActionsFor<"pull_request">;
-export type IssuesAction = ActionsFor<"issues">;
-export type ReleaseAction = ActionsFor<"release">;
-export type WorkflowRunAction = ActionsFor<"workflow_run">;
-export type IssueCommentAction = ActionsFor<"issue_comment">;
-export type PullRequestReviewAction = ActionsFor<"pull_request_review">;
-export type PullRequestReviewCommentAction =
-  ActionsFor<"pull_request_review_comment">;
-export type WatchAction = ActionsFor<"watch">;
-
-/** Create action schema from Octokit-derived actions */
-function actionSchema<T extends string>(prefix: T, eventType: string) {
-  const actions = actionsFor(prefix);
-  return z
-    .string()
-    .refine(
-      (action): action is ActionsFor<T> =>
-        (actions as string[]).includes(action),
-      { message: `Unknown ${eventType} action` }
-    );
-}
 
 /**
  * Base event structure from Octokit's official types
@@ -74,11 +32,53 @@ const BaseEventSchema = z.object({
   }),
 });
 
+/** Create action schema with known actions */
+function actionSchema<T extends readonly string[]>(
+  actions: T,
+  eventType: string
+) {
+  return z
+    .string()
+    .refine(
+      (action): action is T[number] =>
+        (actions as readonly string[]).includes(action),
+      { message: `Unknown ${eventType} action` }
+    );
+}
+
+/** PR actions - includes Events API specific `merged` action */
+const PR_ACTIONS = [
+  // Webhook actions (from @octokit/webhooks)
+  "assigned",
+  "unassigned",
+  "labeled",
+  "unlabeled",
+  "opened",
+  "edited",
+  "closed",
+  "reopened",
+  "synchronize",
+  "converted_to_draft",
+  "locked",
+  "unlocked",
+  "enqueued",
+  "dequeued",
+  "milestoned",
+  "demilestoned",
+  "ready_for_review",
+  "review_requested",
+  "review_request_removed",
+  "auto_merge_enabled",
+  "auto_merge_disabled",
+  // Events API specific
+  "merged",
+] as const;
+
 /**
  * Pull Request Event Payload
  */
 export const PullRequestPayloadSchema = z.object({
-  action: actionSchema("pull_request", "PullRequestEvent"),
+  action: actionSchema(PR_ACTIONS, "PullRequestEvent"),
   number: z.number().optional(),
   pull_request: z
     .object({
@@ -103,11 +103,31 @@ export interface PullRequestEvent extends BaseGitHubEvent {
   payload: PullRequestPayload;
 }
 
+/** Issue actions */
+const ISSUES_ACTIONS = [
+  "opened",
+  "edited",
+  "deleted",
+  "transferred",
+  "pinned",
+  "unpinned",
+  "closed",
+  "reopened",
+  "assigned",
+  "unassigned",
+  "labeled",
+  "unlabeled",
+  "locked",
+  "unlocked",
+  "milestoned",
+  "demilestoned",
+] as const;
+
 /**
  * Issues Event Payload
  */
 export const IssuesPayloadSchema = z.object({
-  action: actionSchema("issues", "IssuesEvent"),
+  action: actionSchema(ISSUES_ACTIONS, "IssuesEvent"),
   issue: z
     .object({
       number: z.number(),
@@ -149,11 +169,22 @@ export interface PushEvent extends BaseGitHubEvent {
   payload: PushPayload;
 }
 
+/** Release actions */
+const RELEASE_ACTIONS = [
+  "published",
+  "unpublished",
+  "created",
+  "edited",
+  "deleted",
+  "prereleased",
+  "released",
+] as const;
+
 /**
  * Release Event Payload
  */
 export const ReleasePayloadSchema = z.object({
-  action: actionSchema("release", "ReleaseEvent"),
+  action: actionSchema(RELEASE_ACTIONS, "ReleaseEvent"),
   release: z
     .object({
       tag_name: z.string(),
@@ -173,11 +204,14 @@ export interface ReleaseEvent extends BaseGitHubEvent {
   payload: ReleasePayload;
 }
 
+/** Workflow run actions */
+const WORKFLOW_RUN_ACTIONS = ["requested", "in_progress", "completed"] as const;
+
 /**
  * Workflow Run Event Payload
  */
 export const WorkflowRunPayloadSchema = z.object({
-  action: actionSchema("workflow_run", "WorkflowRunEvent"),
+  action: actionSchema(WORKFLOW_RUN_ACTIONS, "WorkflowRunEvent"),
   workflow_run: z
     .object({
       name: z.string(),
@@ -195,11 +229,14 @@ export interface WorkflowRunEvent extends BaseGitHubEvent {
   payload: WorkflowRunPayload;
 }
 
+/** Issue comment actions */
+const ISSUE_COMMENT_ACTIONS = ["created", "edited", "deleted"] as const;
+
 /**
  * Issue Comment Event Payload
  */
 export const IssueCommentPayloadSchema = z.object({
-  action: actionSchema("issue_comment", "IssueCommentEvent"),
+  action: actionSchema(ISSUE_COMMENT_ACTIONS, "IssueCommentEvent"),
   issue: z
     .object({
       number: z.number(),
@@ -223,11 +260,22 @@ export interface IssueCommentEvent extends BaseGitHubEvent {
   payload: IssueCommentPayload;
 }
 
+/** PR Review actions - Events API uses `created`/`updated` vs webhook's `submitted`/`edited` */
+const PR_REVIEW_ACTIONS = [
+  // Webhook actions
+  "dismissed",
+  "edited",
+  "submitted",
+  // Events API specific
+  "created",
+  "updated",
+] as const;
+
 /**
  * Pull Request Review Event Payload
  */
 export const PullRequestReviewPayloadSchema = z.object({
-  action: actionSchema("pull_request_review", "PullRequestReviewEvent"),
+  action: actionSchema(PR_REVIEW_ACTIONS, "PullRequestReviewEvent"),
   pull_request: z
     .object({
       number: z.number(),
@@ -290,12 +338,15 @@ export interface DeleteEvent extends BaseGitHubEvent {
   payload: DeletePayload;
 }
 
+/** PR review comment actions */
+const PR_REVIEW_COMMENT_ACTIONS = ["created", "edited", "deleted"] as const;
+
 /**
  * Pull Request Review Comment Event Payload (code review comments)
  */
 export const PullRequestReviewCommentPayloadSchema = z.object({
   action: actionSchema(
-    "pull_request_review_comment",
+    PR_REVIEW_COMMENT_ACTIONS,
     "PullRequestReviewCommentEvent"
   ),
   pull_request: z
@@ -328,11 +379,14 @@ export interface PullRequestReviewCommentEvent extends BaseGitHubEvent {
   payload: PullRequestReviewCommentPayload;
 }
 
+/** Watch actions */
+const WATCH_ACTIONS = ["started"] as const;
+
 /**
  * Watch Event Payload (stars)
  */
 export const WatchPayloadSchema = z.object({
-  action: actionSchema("watch", "WatchEvent"),
+  action: actionSchema(WATCH_ACTIONS, "WatchEvent"),
 });
 
 export type WatchPayload = z.infer<typeof WatchPayloadSchema>;
@@ -466,11 +520,18 @@ export function validateGitHubEvent(event: unknown): GitHubEvent | null {
       return null;
     }
 
-    const eventId = (event as Record<string, unknown>)?.id;
+    const rawEventId = (event as Record<string, unknown>)?.id;
+    const eventId = typeof rawEventId === "string" ? rawEventId : "unknown";
+    const payload = (event as Record<string, unknown>)?.payload as
+      | Record<string, unknown>
+      | undefined;
+    const rawAction = payload?.action;
+    const action = typeof rawAction === "string" ? rawAction : undefined;
 
     console.error(
-      // eslint-disable-next-line @typescript-eslint/no-base-to-string
-      `GitHub event validation failed for ${String(eventType ?? "unknown")} (ID: ${String(eventId ?? "unknown")}):`,
+      `GitHub event validation failed for ${eventType} (ID: ${eventId})` +
+        (action ? ` with action="${action}"` : "") +
+        `:`,
       result.error.format()
     );
     return null;
