@@ -19,6 +19,23 @@ import type {
 } from "../types/webhooks";
 import { buildMessage, getPrEventEmoji, getPrEventHeader } from "./shared";
 
+/**
+ * Extract a clean preview from markdown/HTML content
+ * Strips HTML comments and markdown formatting, returns first non-empty line
+ */
+function extractPreview(body: string, maxLength = 100): string {
+  const cleaned = body
+    .replace(/<!--[\s\S]*?-->/g, "") // Strip HTML comments
+    .replace(/\*\*([^*]+)\*\*/g, "$1") // **bold** → bold
+    .replace(/_([^_]+)_/g, "$1") // _italic_ → italic
+    .replace(/`([^`]+)`/g, "$1") // `code` → code
+    .split("\n")
+    .map(line => line.trim())
+    .find(line => line.length > 0);
+  const preview = cleaned?.substring(0, maxLength) || "";
+  return preview.length < (cleaned?.length || 0) ? preview + "..." : preview;
+}
+
 export function formatPullRequest(payload: PullRequestPayload): string {
   const { action, pull_request, repository } = payload;
 
@@ -147,18 +164,17 @@ export function formatIssueComment(
   const { action, issue, comment, repository } = payload;
 
   if (action === "created") {
-    const shortComment = comment.body.split("\n")[0].substring(0, 100);
-    const preview = `"${shortComment}${comment.body.length > 100 ? "..." : ""}"`;
+    const preview = extractPreview(comment.body);
     const user = comment.user?.login || "unknown";
 
     if (isThreadReply) {
-      return `💬 ${preview} 👤 ${user} 🔗 ${comment.html_url}`;
+      return `💬 "${preview}" 👤 ${user} 🔗 ${comment.html_url}`;
     }
 
     return (
       `💬 **New Comment on Issue #${issue.number}**\n` +
       `**${repository.full_name}**\n\n` +
-      `${preview}\n` +
+      `"${preview}"\n` +
       `👤 ${user}\n` +
       `🔗 ${comment.html_url}`
     );
@@ -182,7 +198,10 @@ export function formatPullRequestReview(
     const user = review.user?.login || "unknown";
 
     if (isThreadReply) {
-      return `${emoji} ${state} 👤 ${user} 🔗 ${review.html_url}`;
+      const preview = review.body ? extractPreview(review.body) : "";
+      return preview
+        ? `${emoji} ${state}: "${preview}" 👤 ${user} 🔗 ${review.html_url}`
+        : `${emoji} ${state} 👤 ${user} 🔗 ${review.html_url}`;
     }
 
     return (
@@ -204,18 +223,17 @@ export function formatPullRequestReviewComment(
   const { action, comment, pull_request, repository } = payload;
 
   if (action === "created") {
-    const shortComment = comment.body.split("\n")[0].substring(0, 100);
-    const preview = `"${shortComment}${comment.body.length > 100 ? "..." : ""}"`;
+    const preview = extractPreview(comment.body);
     const user = comment.user?.login || "unknown";
 
     if (isThreadReply) {
-      return `💬 ${preview} 👤 ${user} 🔗 ${comment.html_url}`;
+      return `💬 "${preview}" 👤 ${user} 🔗 ${comment.html_url}`;
     }
 
     return (
       `💬 **Review Comment on PR #${pull_request.number}**\n` +
       `**${repository.full_name}**\n\n` +
-      `${preview}\n` +
+      `"${preview}"\n` +
       `👤 ${user}\n` +
       `🔗 ${comment.html_url}`
     );
