@@ -46,9 +46,8 @@ function actionSchema<T extends readonly string[]>(
     );
 }
 
-/** PR actions - includes Events API specific `merged` action */
+/** PR actions for Events API (includes `merged` which webhooks sends as `closed` with merged flag) */
 const PR_ACTIONS = [
-  // Webhook actions (from @octokit/webhooks)
   "assigned",
   "unassigned",
   "labeled",
@@ -61,8 +60,6 @@ const PR_ACTIONS = [
   "converted_to_draft",
   "locked",
   "unlocked",
-  "enqueued",
-  "dequeued",
   "milestoned",
   "demilestoned",
   "ready_for_review",
@@ -70,7 +67,6 @@ const PR_ACTIONS = [
   "review_request_removed",
   "auto_merge_enabled",
   "auto_merge_disabled",
-  // Events API specific
   "merged",
 ] as const;
 
@@ -103,7 +99,7 @@ export interface PullRequestEvent extends BaseGitHubEvent {
   payload: PullRequestPayload;
 }
 
-/** Issue actions */
+/** Issue actions for Events API */
 const ISSUES_ACTIONS = [
   "opened",
   "edited",
@@ -121,6 +117,8 @@ const ISSUES_ACTIONS = [
   "unlocked",
   "milestoned",
   "demilestoned",
+  "typed",
+  "untyped",
 ] as const;
 
 /**
@@ -260,16 +258,8 @@ export interface IssueCommentEvent extends BaseGitHubEvent {
   payload: IssueCommentPayload;
 }
 
-/** PR Review actions - Events API uses `created`/`updated` vs webhook's `submitted`/`edited` */
-const PR_REVIEW_ACTIONS = [
-  // Webhook actions
-  "dismissed",
-  "edited",
-  "submitted",
-  // Events API specific
-  "created",
-  "updated",
-] as const;
+/** PR Review actions for Events API */
+const PR_REVIEW_ACTIONS = ["submitted", "edited", "dismissed"] as const;
 
 /**
  * Pull Request Review Event Payload
