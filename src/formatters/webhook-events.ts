@@ -140,17 +140,26 @@ export function formatWorkflowRun(payload: WorkflowRunPayload): string {
   return "";
 }
 
-export function formatIssueComment(payload: IssueCommentPayload): string {
+export function formatIssueComment(
+  payload: IssueCommentPayload,
+  isThreadReply?: boolean
+): string {
   const { action, issue, comment, repository } = payload;
 
   if (action === "created") {
     const shortComment = comment.body.split("\n")[0].substring(0, 100);
+    const preview = `"${shortComment}${comment.body.length > 100 ? "..." : ""}"`;
+    const user = comment.user?.login || "unknown";
+
+    if (isThreadReply) {
+      return `💬 ${preview} 👤 ${user} 🔗 ${comment.html_url}`;
+    }
 
     return (
       `💬 **New Comment on Issue #${issue.number}**\n` +
       `**${repository.full_name}**\n\n` +
-      `"${shortComment}${comment.body.length > 100 ? "..." : ""}"\n` +
-      `👤 ${comment.user?.login || "unknown"}\n` +
+      `${preview}\n` +
+      `👤 ${user}\n` +
       `🔗 ${comment.html_url}`
     );
   }
@@ -159,7 +168,8 @@ export function formatIssueComment(payload: IssueCommentPayload): string {
 }
 
 export function formatPullRequestReview(
-  payload: PullRequestReviewPayload
+  payload: PullRequestReviewPayload,
+  isThreadReply?: boolean
 ): string {
   const { action, review, pull_request, repository } = payload;
 
@@ -168,11 +178,18 @@ export function formatPullRequestReview(
     if (review.state === "approved") emoji = "✅";
     if (review.state === "changes_requested") emoji = "🔄";
 
+    const state = review.state.replace("_", " ");
+    const user = review.user?.login || "unknown";
+
+    if (isThreadReply) {
+      return `${emoji} ${state} 👤 ${user} 🔗 ${review.html_url}`;
+    }
+
     return (
-      `${emoji} **PR Review: ${review.state.replace("_", " ")}**\n` +
+      `${emoji} **PR Review: ${state}**\n` +
       `**${repository.full_name}** #${pull_request.number}\n\n` +
       `**${pull_request.title}**\n` +
-      `👤 ${review.user?.login || "unknown"}\n` +
+      `👤 ${user}\n` +
       `🔗 ${review.html_url}`
     );
   }
@@ -181,18 +198,25 @@ export function formatPullRequestReview(
 }
 
 export function formatPullRequestReviewComment(
-  payload: PullRequestReviewCommentPayload
+  payload: PullRequestReviewCommentPayload,
+  isThreadReply?: boolean
 ): string {
   const { action, comment, pull_request, repository } = payload;
 
   if (action === "created") {
     const shortComment = comment.body.split("\n")[0].substring(0, 100);
+    const preview = `"${shortComment}${comment.body.length > 100 ? "..." : ""}"`;
+    const user = comment.user?.login || "unknown";
+
+    if (isThreadReply) {
+      return `💬 ${preview} 👤 ${user} 🔗 ${comment.html_url}`;
+    }
 
     return (
       `💬 **Review Comment on PR #${pull_request.number}**\n` +
       `**${repository.full_name}**\n\n` +
-      `"${shortComment}${comment.body.length > 100 ? "..." : ""}"\n` +
-      `👤 ${comment.user?.login || "unknown"}\n` +
+      `${preview}\n` +
+      `👤 ${user}\n` +
       `🔗 ${comment.html_url}`
     );
   }

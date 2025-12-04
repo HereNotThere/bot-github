@@ -82,7 +82,7 @@ export class EventProcessor {
   >(
     event: T,
     eventType: EventType,
-    formatter: (event: T) => string,
+    formatter: (event: T, isThreadReply?: boolean) => string,
     logContext?: string,
     branchContext?: { branch: string },
     threadingContext?: ThreadingContext
@@ -130,8 +130,9 @@ export class EventProcessor {
       return;
     }
 
-    // Format message
-    const message = formatter(event);
+    // Format message (compact for thread replies)
+    const isThreadReply = threadingContext && !threadingContext.isAnchor;
+    const message = formatter(event, isThreadReply);
 
     if (!message) {
       console.log(
@@ -147,16 +148,15 @@ export class EventProcessor {
 
       try {
         // For follow-up events, look up existing thread (undefined if not found or anchor)
-        const threadId =
-          threadingContext && !threadingContext.isAnchor
-            ? ((await this.threadService.getThreadId(
-                spaceId,
-                channelId,
-                repoFullName,
-                threadingContext.anchorType,
-                threadingContext.anchorNumber
-              )) ?? undefined)
-            : undefined;
+        const threadId = isThreadReply
+          ? ((await this.threadService.getThreadId(
+              spaceId,
+              channelId,
+              repoFullName,
+              threadingContext.anchorType,
+              threadingContext.anchorNumber
+            )) ?? undefined)
+          : undefined;
 
         // Send message (threaded for follow-ups, top-level for anchors/no-context)
         const { eventId } = await this.bot.sendMessage(channelId, message, {
