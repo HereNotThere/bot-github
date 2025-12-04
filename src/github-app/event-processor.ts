@@ -131,7 +131,7 @@ export class EventProcessor {
     }
 
     // Format message (compact for thread replies)
-    const isThreadReply = threadingContext && !threadingContext.isAnchor;
+    const isThreadReply = !!threadingContext && !threadingContext.isAnchor;
     const message = formatter(event, isThreadReply);
 
     if (!message) {
