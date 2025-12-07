@@ -19,7 +19,6 @@ import type {
   DeliveryAction,
   EntityContext,
   MessageDeliveryService,
-  ThreadingContext,
 } from "../services/message-delivery-service";
 import type {
   BranchFilter,
@@ -65,7 +64,6 @@ export class EventProcessor {
     formatter: (event: T, isThreadReply?: boolean) => string,
     logContext?: string,
     branchContext?: { branch: string },
-    threadingContext?: ThreadingContext,
     entityContext?: EntityContext
   ) {
     if (logContext) {
@@ -118,7 +116,6 @@ export class EventProcessor {
         channelId: channel.channelId,
         repoFullName,
         action,
-        threadingContext,
         entityContext,
         formatter: isThreadReply => formatter(event, isThreadReply),
       })
@@ -143,9 +140,11 @@ export class EventProcessor {
       `PR event: ${action} - ${repository.full_name}#${pull_request.number}`,
       { branch: baseBranch },
       {
-        anchorType: "pr",
-        anchorNumber: pull_request.number,
+        githubEntityType: "pr",
+        githubEntityId: String(pull_request.number),
         isAnchor: action === "opened",
+        parentType: "pr",
+        parentNumber: pull_request.number,
       }
     );
   }
@@ -182,9 +181,11 @@ export class EventProcessor {
       `issue event: ${action} - ${repository.full_name}#${issue.number}`,
       undefined,
       {
-        anchorType: "issue",
-        anchorNumber: issue.number,
+        githubEntityType: "issue",
+        githubEntityId: String(issue.number),
         isAnchor: action === "opened",
+        parentType: "issue",
+        parentNumber: issue.number,
       }
     );
   }
@@ -242,13 +243,9 @@ export class EventProcessor {
       `issue comment event: ${action} - ${repository.full_name}#${issue.number}`,
       undefined,
       {
-        anchorType: isPrComment ? "pr" : "issue",
-        anchorNumber: issue.number,
-        isAnchor: false,
-      },
-      {
         githubEntityType: "comment",
         githubEntityId: String(comment.id),
+        isAnchor: false,
         parentType: isPrComment ? "pr" : "issue",
         parentNumber: issue.number,
         githubUpdatedAt: new Date(comment.updated_at),
@@ -278,13 +275,9 @@ export class EventProcessor {
       `PR review event: ${action} - ${repository.full_name}#${pull_request.number}`,
       { branch: baseBranch },
       {
-        anchorType: "pr",
-        anchorNumber: pull_request.number,
-        isAnchor: false,
-      },
-      {
         githubEntityType: "review",
         githubEntityId: String(review.id),
+        isAnchor: false,
         parentType: "pr",
         parentNumber: pull_request.number,
         githubUpdatedAt: new Date(review.submitted_at ?? Date.now()),
@@ -310,13 +303,9 @@ export class EventProcessor {
       `PR review comment event: ${action} - ${repository.full_name}#${pull_request.number}`,
       { branch: baseBranch },
       {
-        anchorType: "pr",
-        anchorNumber: pull_request.number,
-        isAnchor: false,
-      },
-      {
         githubEntityType: "review_comment",
         githubEntityId: String(comment.id),
+        isAnchor: false,
         parentType: "pr",
         parentNumber: pull_request.number,
         githubUpdatedAt: new Date(comment.updated_at),
