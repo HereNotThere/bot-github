@@ -2,7 +2,7 @@ import { and, eq, gt, lt } from "drizzle-orm";
 
 import { MESSAGE_MAPPING_EXPIRY_DAYS } from "../constants";
 import { db } from "../db";
-import { eventThreads, messageMappings } from "../db/schema";
+import { messageMappings } from "../db/schema";
 import type { TownsBot } from "../types/bot";
 
 export type AnchorType = "pr" | "issue";
@@ -13,25 +13,16 @@ export type GithubEntityType =
   | "comment"
   | "review"
   | "review_comment";
-export type ParentType = "pr" | "issue";
-
-/**
- * Threading context for events that can be grouped into threads
- */
-export interface ThreadingContext {
-  anchorType: AnchorType;
-  anchorNumber: number;
-  isAnchor: boolean;
-}
 
 /**
  * Entity context for tracking GitHub entities to Towns messages
- * Field names match DB schema for easy spreading
+ * Unified context for both threading and message tracking
  */
 export interface EntityContext {
   githubEntityType: GithubEntityType;
   githubEntityId: string;
-  parentType?: ParentType;
+  isAnchor: boolean; // true = starts a thread (PR/issue opened)
+  parentType?: AnchorType; // for threading - the parent anchor
   parentNumber?: number;
   githubUpdatedAt?: Date;
 }
@@ -44,8 +35,7 @@ export interface DeliveryParams {
   channelId: string;
   repoFullName: string;
   action: DeliveryAction;
-  threadingContext?: ThreadingContext;
-  entityContext?: EntityContext;
+  entityContext?: EntityContext; // required for edit/delete, optional for create
   formatter: (isThreadReply: boolean) => string;
 }
 
@@ -68,22 +58,23 @@ export class MessageDeliveryService {
       channelId,
       repoFullName,
       action,
-      threadingContext,
       entityContext,
       formatter,
     } = params;
 
     try {
-      // Thread lookup (determines compact format for edit/create)
-      const isFollowUpEvent = !!threadingContext && !threadingContext.isAnchor;
+      // Thread lookup: non-anchors reply to their parent anchor
       const threadId =
-        isFollowUpEvent && threadingContext
-          ? ((await this.getThreadId(
+        entityContext &&
+        !entityContext.isAnchor &&
+        entityContext.parentType &&
+        entityContext.parentNumber != null
+          ? ((await this.getMessageId(
               spaceId,
               channelId,
               repoFullName,
-              threadingContext.anchorType,
-              threadingContext.anchorNumber
+              entityContext.parentType,
+              String(entityContext.parentNumber)
             )) ?? undefined)
           : undefined;
 
@@ -132,7 +123,6 @@ export class MessageDeliveryService {
             spaceId,
             channelId,
             repoFullName,
-            threadingContext,
             entityContext,
             threadId,
             message
@@ -235,7 +225,6 @@ export class MessageDeliveryService {
     spaceId: string,
     channelId: string,
     repoFullName: string,
-    threadingContext: ThreadingContext | undefined,
     entityContext: EntityContext | undefined,
     threadId: string | undefined,
     message: string
@@ -244,102 +233,24 @@ export class MessageDeliveryService {
       threadId,
     });
 
-    // Store thread mapping for anchor events
-    if (threadingContext?.isAnchor && eventId) {
-      await this.storeThread({
-        spaceId,
-        channelId,
-        repoFullName,
-        anchorType: threadingContext.anchorType,
-        anchorNumber: threadingContext.anchorNumber,
-        threadEventId: eventId,
-      });
-    }
+    if (!eventId || !entityContext) return;
 
-    // Store message mapping for editing/deleting
-    if (entityContext && eventId) {
-      await this.storeMapping({
-        spaceId,
-        channelId,
-        repoFullName,
-        ...entityContext,
-        townsMessageId: eventId,
-      });
-    }
+    // Store entity mapping (for both threading and editing)
+    await this.storeMapping({
+      spaceId,
+      channelId,
+      repoFullName,
+      githubEntityType: entityContext.githubEntityType,
+      githubEntityId: entityContext.githubEntityId,
+      parentType: entityContext.parentType,
+      parentNumber: entityContext.parentNumber,
+      githubUpdatedAt: entityContext.githubUpdatedAt,
+      townsMessageId: eventId,
+    });
   }
 
   // ============================================================================
-  // Thread Management (from ThreadService)
-  // ============================================================================
-
-  /**
-   * Get thread ID for an anchor (PR/issue).
-   * Uses gt(expiresAt, now) so expired rows are ignored even before cleanup runs.
-   */
-  private async getThreadId(
-    spaceId: string,
-    channelId: string,
-    repoFullName: string,
-    anchorType: AnchorType,
-    anchorNumber: number
-  ): Promise<string | null> {
-    const results = await db
-      .select({ threadEventId: eventThreads.threadEventId })
-      .from(eventThreads)
-      .where(
-        and(
-          eq(eventThreads.spaceId, spaceId),
-          eq(eventThreads.channelId, channelId),
-          eq(eventThreads.repoFullName, repoFullName),
-          eq(eventThreads.anchorType, anchorType),
-          eq(eventThreads.anchorNumber, anchorNumber),
-          gt(eventThreads.expiresAt, new Date())
-        )
-      )
-      .limit(1);
-
-    return results[0]?.threadEventId ?? null;
-  }
-
-  private async storeThread(
-    params: {
-      spaceId: string;
-      channelId: string;
-      repoFullName: string;
-      anchorType: AnchorType;
-      anchorNumber: number;
-      threadEventId: string;
-    },
-    expiryDays = MESSAGE_MAPPING_EXPIRY_DAYS
-  ): Promise<void> {
-    const now = new Date();
-    const expiresAt = new Date(now);
-    expiresAt.setDate(expiresAt.getDate() + expiryDays);
-
-    await db
-      .insert(eventThreads)
-      .values({
-        ...params,
-        createdAt: now,
-        expiresAt,
-      })
-      .onConflictDoUpdate({
-        target: [
-          eventThreads.spaceId,
-          eventThreads.channelId,
-          eventThreads.repoFullName,
-          eventThreads.anchorType,
-          eventThreads.anchorNumber,
-        ],
-        set: {
-          threadEventId: params.threadEventId,
-          expiresAt,
-        },
-      });
-  }
-
-  // ============================================================================
-  // Message Mapping Management (from MessageMappingService)
+  // Message Mapping Management
   // ============================================================================
 
   /**
@@ -378,7 +289,7 @@ export class MessageDeliveryService {
       repoFullName: string;
       githubEntityType: GithubEntityType;
       githubEntityId: string;
-      parentType?: ParentType;
+      parentType?: AnchorType;
       parentNumber?: number;
       townsMessageId: string;
       githubUpdatedAt?: Date;
@@ -465,30 +376,27 @@ export class MessageDeliveryService {
   // ============================================================================
 
   /**
-   * Delete expired records from both tables.
+   * Delete expired records from messageMappings.
    * Uses lt(expiresAt, now) to clean up rows that lookups already ignore.
    */
-  async cleanupExpired(): Promise<{ threads: number; messages: number }> {
-    const now = new Date();
-
-    const [threadResults, messageResults] = await Promise.all([
-      db
-        .delete(eventThreads)
-        .where(lt(eventThreads.expiresAt, now))
-        .returning({ id: eventThreads.id }),
-      db
+  private async cleanupExpired(): Promise<void> {
+    try {
+      const results = await db
         .delete(messageMappings)
-        .where(lt(messageMappings.expiresAt, now))
+        .where(lt(messageMappings.expiresAt, new Date()))
         .returning({
           channelId: messageMappings.channelId,
           entityId: messageMappings.githubEntityId,
-        }),
-    ]);
+        });
 
-    return {
-      threads: threadResults.length,
-      messages: messageResults.length,
-    };
+      if (results.length > 0) {
+        console.log(
+          `[Message Delivery Cleanup] Removed ${results.length} expired mappings`
+        );
+      }
+    } catch (error) {
+      console.error("[Message Delivery Cleanup] Cleanup failed:", error);
+    }
   }
 
   /**
@@ -501,38 +409,9 @@ export class MessageDeliveryService {
       `[Message Delivery Cleanup] Starting periodic cleanup (every ${intervalMs / 1000 / 60 / 60} hours)`
     );
 
-    // Run cleanup immediately on start
-    this.cleanupExpired()
-      .then(({ threads, messages }) => {
-        if (threads > 0 || messages > 0) {
-          console.log(
-            `[Message Delivery Cleanup] Removed ${threads} threads, ${messages} message mappings`
-          );
-        }
-      })
-      .catch(error => {
-        console.error(
-          "[Message Delivery Cleanup] Initial cleanup failed:",
-          error
-        );
-      });
-
-    // Schedule periodic cleanup
+    void this.cleanupExpired();
     return setInterval(() => {
-      this.cleanupExpired()
-        .then(({ threads, messages }) => {
-          if (threads > 0 || messages > 0) {
-            console.log(
-              `[Message Delivery Cleanup] Removed ${threads} threads, ${messages} message mappings`
-            );
-          }
-        })
-        .catch(error => {
-          console.error(
-            "[Message Delivery Cleanup] Periodic cleanup failed:",
-            error
-          );
-        });
+      void this.cleanupExpired();
     }, intervalMs);
   }
 }
