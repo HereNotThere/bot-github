@@ -78,6 +78,23 @@ export class MessageDeliveryService {
             )) ?? undefined)
           : undefined;
 
+      // Skip synthetic thread replies (closed/reopened) when anchor doesn't exist
+      // These have githubEntityType === parentType (e.g., "pr" for PR close event)
+      // Real entities like comments have different types (e.g., "comment" with parent "pr")
+      // (Retroactive anchor will be created by subsequent "edit" action)
+      if (
+        action === "create" &&
+        entityContext &&
+        !entityContext.isAnchor &&
+        entityContext.githubEntityType === entityContext.parentType &&
+        !threadId
+      ) {
+        console.log(
+          `Skipping thread reply for ${entityContext.githubEntityType}:${entityContext.githubEntityId} - no anchor exists`
+        );
+        return;
+      }
+
       switch (action) {
         case "delete":
           if (!entityContext) {
