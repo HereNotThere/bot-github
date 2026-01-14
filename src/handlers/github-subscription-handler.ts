@@ -89,7 +89,7 @@ async function handleSubscribe(
   oauthService: GitHubOAuthService,
   repoArg: string | undefined
 ): Promise<void> {
-  const { channelId, spaceId, args } = event;
+  const { channelId, args } = event;
 
   if (!repoArg) {
     await handler.sendMessage(
@@ -127,7 +127,7 @@ async function handleSubscribe(
 
   // Check if already subscribed - if so, add event types instead (case-insensitive match)
   const channelSubscriptions =
-    await subscriptionService.getChannelSubscriptions(channelId, spaceId);
+    await subscriptionService.getChannelSubscriptions(channelId);
   const existingSubscription = channelSubscriptions.find(
     sub => sub.repo.toLowerCase() === repo.toLowerCase()
   );
@@ -274,7 +274,6 @@ async function handleUpdateSubscription(
   // Update subscription (add event types and/or update branch filter)
   const updateResult = await subscriptionService.updateSubscription(
     userId,
-    spaceId,
     channelId,
     repo,
     eventTypes,
@@ -306,7 +305,7 @@ async function handleUnsubscribe(
   oauthService: GitHubOAuthService,
   repoArg: string | undefined
 ): Promise<void> {
-  const { channelId, spaceId, args } = event;
+  const { channelId, args } = event;
 
   if (!repoArg) {
     await handler.sendMessage(
@@ -326,10 +325,8 @@ async function handleUnsubscribe(
   }
 
   // Check if channel has any subscriptions
-  const channelRepos = await subscriptionService.getChannelSubscriptions(
-    channelId,
-    spaceId
-  );
+  const channelRepos =
+    await subscriptionService.getChannelSubscriptions(channelId);
   if (channelRepos.length === 0) {
     await handler.sendMessage(
       channelId,
@@ -451,7 +448,6 @@ async function handleRemoveEventTypes(
   // Remove event types (validates repo access)
   const removeResult = await subscriptionService.removeEventTypes(
     userId,
-    spaceId,
     channelId,
     repo,
     typesToRemove as EventType[]
@@ -517,7 +513,6 @@ async function handleFullUnsubscribe(
   // Use removeEventTypes with all event types - validates repo access and deletes subscription
   const removeResult = await subscriptionService.removeEventTypes(
     userId,
-    spaceId,
     channelId,
     repo,
     eventTypes
@@ -539,12 +534,10 @@ async function handleStatus(
   event: SlashCommandEvent,
   subscriptionService: SubscriptionService
 ): Promise<void> {
-  const { channelId, spaceId } = event;
+  const { channelId } = event;
 
-  const subscriptions = await subscriptionService.getChannelSubscriptions(
-    channelId,
-    spaceId
-  );
+  const subscriptions =
+    await subscriptionService.getChannelSubscriptions(channelId);
   if (subscriptions.length === 0) {
     await handler.sendMessage(
       channelId,

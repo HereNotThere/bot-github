@@ -62,7 +62,7 @@ export async function handleOAuthCallback(
 
     // If there was a redirect action (e.g., subscribe), complete the subscription
     if (redirectAction === "subscribe" && redirectData) {
-      if (redirectData.repo && spaceId && townsUserId) {
+      if (redirectData.repo && townsUserId) {
         const eventTypes: EventType[] = redirectData.eventTypes ?? [
           ...DEFAULT_EVENT_TYPES_ARRAY,
         ];
@@ -71,7 +71,7 @@ export async function handleOAuthCallback(
         const branchFilter = redirectData.branchFilter ?? null;
         const subResult = await subscriptionService.createSubscription({
           townsUserId,
-          spaceId,
+          spaceId, // May be null for DMs
           channelId,
           repoIdentifier: redirectData.repo,
           eventTypes,
@@ -112,14 +112,13 @@ export async function handleOAuthCallback(
 
     // Handle subscription update (add event types to existing subscription)
     if (redirectAction === "subscribe-update" && redirectData) {
-      if (redirectData.repo && spaceId && townsUserId) {
+      if (redirectData.repo && townsUserId) {
         const eventTypes: EventType[] = redirectData.eventTypes ?? [
           ...DEFAULT_EVENT_TYPES_ARRAY,
         ];
 
         const updateResult = await subscriptionService.updateSubscription(
           townsUserId,
-          spaceId,
           channelId,
           redirectData.repo,
           eventTypes,
@@ -147,15 +146,9 @@ export async function handleOAuthCallback(
 
     // Handle unsubscribe update (remove event types from existing subscription)
     if (redirectAction === "unsubscribe-update" && redirectData) {
-      if (
-        redirectData.repo &&
-        spaceId &&
-        townsUserId &&
-        redirectData.eventTypes
-      ) {
+      if (redirectData.repo && townsUserId && redirectData.eventTypes) {
         const removeResult = await subscriptionService.removeEventTypes(
           townsUserId,
-          spaceId,
           channelId,
           redirectData.repo,
           redirectData.eventTypes

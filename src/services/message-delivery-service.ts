@@ -35,7 +35,7 @@ export interface EntityContext {
  * Parameters for delivering a message
  */
 export interface DeliveryParams {
-  spaceId: string;
+  spaceId: string | null; // Null for DM channels
   channelId: string;
   repoFullName: string;
   action: DeliveryAction;
@@ -84,7 +84,6 @@ export class MessageDeliveryService {
           if (delay) await new Promise(r => setTimeout(r, delay));
           threadId =
             (await this.getMessageId(
-              spaceId,
               channelId,
               repoFullName,
               entityContext.parentType,
@@ -125,12 +124,7 @@ export class MessageDeliveryService {
             console.log("Delete action requires entityContext");
             return;
           }
-          await this.handleDelete(
-            spaceId,
-            channelId,
-            repoFullName,
-            entityContext
-          );
+          await this.handleDelete(channelId, repoFullName, entityContext);
           return;
 
         case "edit": {
@@ -176,14 +170,12 @@ export class MessageDeliveryService {
   }
 
   private async handleDelete(
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     entityContext: EntityContext
   ): Promise<void> {
     const { githubEntityType, githubEntityId } = entityContext;
     const existingMessageId = await this.getMessageId(
-      spaceId,
       channelId,
       repoFullName,
       githubEntityType,
@@ -193,7 +185,6 @@ export class MessageDeliveryService {
     if (existingMessageId) {
       await this.bot.removeEvent(channelId, existingMessageId);
       await this.deleteMapping(
-        spaceId,
         channelId,
         repoFullName,
         githubEntityType,
@@ -206,7 +197,7 @@ export class MessageDeliveryService {
   }
 
   private async handleEdit(
-    spaceId: string,
+    spaceId: string | null,
     channelId: string,
     repoFullName: string,
     entityContext: EntityContext,
@@ -214,7 +205,6 @@ export class MessageDeliveryService {
   ): Promise<void> {
     const { githubEntityType, githubEntityId, githubUpdatedAt } = entityContext;
     const existingMessageId = await this.getMessageId(
-      spaceId,
       channelId,
       repoFullName,
       githubEntityType,
@@ -247,7 +237,6 @@ export class MessageDeliveryService {
     // Check if we should process this update
     if (githubUpdatedAt) {
       const shouldUpdate = await this.shouldUpdate(
-        spaceId,
         channelId,
         repoFullName,
         githubEntityType,
@@ -283,7 +272,7 @@ export class MessageDeliveryService {
   }
 
   private async handleCreate(
-    spaceId: string,
+    spaceId: string | null,
     channelId: string,
     repoFullName: string,
     entityContext: EntityContext | undefined,
@@ -319,7 +308,6 @@ export class MessageDeliveryService {
    * Uses gt(expiresAt, now) so expired rows are ignored even before cleanup runs.
    */
   private async getMessageId(
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     entityType: GithubEntityType,
@@ -330,7 +318,6 @@ export class MessageDeliveryService {
       .from(messageMappings)
       .where(
         and(
-          eq(messageMappings.spaceId, spaceId),
           eq(messageMappings.channelId, channelId),
           eq(messageMappings.repoFullName, repoFullName),
           eq(messageMappings.githubEntityType, entityType),
@@ -345,7 +332,7 @@ export class MessageDeliveryService {
 
   private async storeMapping(
     params: {
-      spaceId: string;
+      spaceId: string | null;
       channelId: string;
       repoFullName: string;
       githubEntityType: GithubEntityType;
@@ -370,13 +357,13 @@ export class MessageDeliveryService {
       })
       .onConflictDoUpdate({
         target: [
-          messageMappings.spaceId,
           messageMappings.channelId,
           messageMappings.repoFullName,
           messageMappings.githubEntityType,
           messageMappings.githubEntityId,
         ],
         set: {
+          spaceId: params.spaceId,
           townsMessageId: params.townsMessageId,
           githubUpdatedAt: params.githubUpdatedAt,
           expiresAt,
@@ -385,7 +372,6 @@ export class MessageDeliveryService {
   }
 
   private async shouldUpdate(
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     entityType: GithubEntityType,
@@ -397,7 +383,6 @@ export class MessageDeliveryService {
       .from(messageMappings)
       .where(
         and(
-          eq(messageMappings.spaceId, spaceId),
           eq(messageMappings.channelId, channelId),
           eq(messageMappings.repoFullName, repoFullName),
           eq(messageMappings.githubEntityType, entityType),
@@ -413,7 +398,6 @@ export class MessageDeliveryService {
   }
 
   private async deleteMapping(
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     entityType: GithubEntityType,
@@ -423,7 +407,6 @@ export class MessageDeliveryService {
       .delete(messageMappings)
       .where(
         and(
-          eq(messageMappings.spaceId, spaceId),
           eq(messageMappings.channelId, channelId),
           eq(messageMappings.repoFullName, repoFullName),
           eq(messageMappings.githubEntityType, entityType),
