@@ -24,13 +24,8 @@ Thank you for your interest in contributing! This guide covers development setup
 2. **Setup database**
 
    ```bash
-   # Start PostgreSQL with Docker
-   docker run --rm --name github-bot-db \
-     -e POSTGRES_USER=postgres \
-     -e POSTGRES_PASSWORD=postgres \
-     -e POSTGRES_DB=github-bot \
-     -p 5432:5432 \
-     postgres:18
+   bun db:up        # Start PostgreSQL (data persists across restarts)
+   bun db:migrate   # Run migrations
    ```
 
 3. **Configure environment** (see Configuration section below)
@@ -65,14 +60,14 @@ Thank you for your interest in contributing! This guide covers development setup
 
 #### GitHub App (Optional - Enables Real-Time Webhooks)
 
-| Variable                        | Description                                | How to Get                                                 |
-|---------------------------------| ------------------------------------------ | ---------------------------------------------------------- |
-| `GITHUB_APP_ID`                 | GitHub App ID                              | GitHub App settings page                                   |
-| `GITHUB_APP_PRIVATE_KEY_BASE64` | Base64-encoded private key                 | Download `.pem`, encode: `base64 -i key.pem | tr -d '\n'`  |
-| `GITHUB_APP_CLIENT_ID`          | OAuth client ID (format: `Iv1.abc123`)     | GitHub App OAuth settings                                  |
-| `GITHUB_APP_CLIENT_SECRET`      | OAuth client secret                        | GitHub App OAuth settings                                  |
-| `GITHUB_WEBHOOK_SECRET`         | Webhook signature secret                   | Generate: `openssl rand -hex 32`                           |
-| `GITHUB_APP_SLUG`               | App URL slug (default: `towns-github-bot`) | Optional - for custom app names                            |
+| Variable                        | Description                                | How to Get                                  |
+| ------------------------------- | ------------------------------------------ | ------------------------------------------- | ----------- |
+| `GITHUB_APP_ID`                 | GitHub App ID                              | GitHub App settings page                    |
+| `GITHUB_APP_PRIVATE_KEY_BASE64` | Base64-encoded private key                 | Download `.pem`, encode: `base64 -i key.pem | tr -d '\n'` |
+| `GITHUB_APP_CLIENT_ID`          | OAuth client ID (format: `Iv1.abc123`)     | GitHub App OAuth settings                   |
+| `GITHUB_APP_CLIENT_SECRET`      | OAuth client secret                        | GitHub App OAuth settings                   |
+| `GITHUB_WEBHOOK_SECRET`         | Webhook signature secret                   | Generate: `openssl rand -hex 32`            |
+| `GITHUB_APP_SLUG`               | App URL slug (default: `towns-github-bot`) | Optional - for custom app names             |
 
 #### Optional Configuration
 

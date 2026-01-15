@@ -43,7 +43,7 @@ export type BranchFilter = string | null;
  */
 export interface SubscribeParams {
   townsUserId: string;
-  spaceId: string;
+  spaceId?: string; // Undefined for DM channels
   channelId: string;
   repoIdentifier: string; // Format: "owner/repo"
   eventTypes: EventType[];
@@ -226,13 +226,12 @@ export class SubscriptionService {
       deliveryMode = installationId ? "webhook" : "polling";
     }
 
-    // 4. Check if already subscribed
+    // 4. Check if already subscribed (channelId is globally unique)
     const existing = await db
       .select()
       .from(githubSubscriptions)
       .where(
         and(
-          eq(githubSubscriptions.spaceId, spaceId),
           eq(githubSubscriptions.channelId, channelId),
           eq(githubSubscriptions.repoFullName, repoInfo.fullName)
         )
@@ -250,7 +249,7 @@ export class SubscriptionService {
     // 5. Create subscription
     const now = new Date();
     await db.insert(githubSubscriptions).values({
-      spaceId,
+      spaceId: spaceId ?? null, // Store spaceId when available, null for DMs
       channelId,
       repoFullName: repoInfo.fullName,
       deliveryMode,
@@ -290,7 +289,6 @@ export class SubscriptionService {
    */
   async updateSubscription(
     townsUserId: string,
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     newEventTypes: EventType[],
@@ -303,7 +301,6 @@ export class SubscriptionService {
   }> {
     const validation = await this.validateRepoAccessAndGetSubscription(
       townsUserId,
-      spaceId,
       channelId,
       repoFullName
     );
@@ -321,7 +318,7 @@ export class SubscriptionService {
     const finalBranchFilter =
       branchFilter !== undefined ? branchFilter : currentBranchFilter;
 
-    // Update subscription
+    // Update subscription (channelId is globally unique)
     const result = await db
       .update(githubSubscriptions)
       .set({
@@ -331,7 +328,6 @@ export class SubscriptionService {
       })
       .where(
         and(
-          eq(githubSubscriptions.spaceId, spaceId),
           eq(githubSubscriptions.channelId, channelId),
           eq(githubSubscriptions.repoFullName, repoFullName)
         )
@@ -360,7 +356,6 @@ export class SubscriptionService {
    */
   async removeEventTypes(
     townsUserId: string,
-    spaceId: string,
     channelId: string,
     repoFullName: string,
     typesToRemove: EventType[]
@@ -372,7 +367,6 @@ export class SubscriptionService {
   }> {
     const validation = await this.validateRepoAccessAndGetSubscription(
       townsUserId,
-      spaceId,
       channelId,
       repoFullName
     );
@@ -388,7 +382,7 @@ export class SubscriptionService {
 
     // If no types remain, delete the subscription
     if (remainingTypes.length === 0) {
-      const deleted = await this.unsubscribe(channelId, spaceId, repoFullName);
+      const deleted = await this.unsubscribe(channelId, repoFullName);
       if (!deleted) {
         return {
           success: false,
@@ -401,7 +395,7 @@ export class SubscriptionService {
       };
     }
 
-    // Update subscription with remaining types
+    // Update subscription with remaining types (channelId is globally unique)
     const updated = await db
       .update(githubSubscriptions)
       .set({
@@ -410,7 +404,6 @@ export class SubscriptionService {
       })
       .where(
         and(
-          eq(githubSubscriptions.spaceId, spaceId),
           eq(githubSubscriptions.channelId, channelId),
           eq(githubSubscriptions.repoFullName, repoFullName)
         )
@@ -468,7 +461,7 @@ export class SubscriptionService {
         // Create the subscription (will be webhook mode since installation exists)
         const result = await this.createSubscription({
           townsUserId: sub.townsUserId,
-          spaceId: sub.spaceId,
+          spaceId: sub.spaceId ?? undefined,
           channelId: sub.channelId,
           repoIdentifier: repoFullName,
           eventTypes,
@@ -507,16 +500,12 @@ export class SubscriptionService {
   /**
    * Unsubscribe a channel from a repository
    */
-  async unsubscribe(
-    channelId: string,
-    spaceId: string,
-    repoFullName: string
-  ): Promise<boolean> {
+  async unsubscribe(channelId: string, repoFullName: string): Promise<boolean> {
+    // channelId is globally unique in Towns
     const result = await db
       .delete(githubSubscriptions)
       .where(
         and(
-          eq(githubSubscriptions.spaceId, spaceId),
           eq(githubSubscriptions.channelId, channelId),
           eq(githubSubscriptions.repoFullName, repoFullName)
         )
@@ -530,7 +519,6 @@ export class SubscriptionService {
    * Get a specific subscription
    */
   async getSubscription(
-    spaceId: string,
     channelId: string,
     repoFullName: string
   ): Promise<{
@@ -540,6 +528,7 @@ export class SubscriptionService {
     createdByTownsUserId: string;
     branchFilter: BranchFilter;
   } | null> {
+    // channelId is globally unique in Towns
     const results = await db
       .select({
         id: githubSubscriptions.id,
@@ -551,7 +540,6 @@ export class SubscriptionService {
       .from(githubSubscriptions)
       .where(
         and(
-          eq(githubSubscriptions.spaceId, spaceId),
           eq(githubSubscriptions.channelId, channelId),
           eq(githubSubscriptions.repoFullName, repoFullName)
         )
@@ -569,10 +557,7 @@ export class SubscriptionService {
   /**
    * Get all subscriptions for a channel
    */
-  async getChannelSubscriptions(
-    channelId: string,
-    spaceId: string
-  ): Promise<
+  async getChannelSubscriptions(channelId: string): Promise<
     Array<{
       repo: string;
       eventTypes: EventType[];
@@ -580,6 +565,7 @@ export class SubscriptionService {
       branchFilter: BranchFilter;
     }>
   > {
+    // channelId is globally unique in Towns
     const results = await db
       .select({
         repo: githubSubscriptions.repoFullName,
@@ -588,12 +574,7 @@ export class SubscriptionService {
         branchFilter: githubSubscriptions.branchFilter,
       })
       .from(githubSubscriptions)
-      .where(
-        and(
-          eq(githubSubscriptions.channelId, channelId),
-          eq(githubSubscriptions.spaceId, spaceId)
-        )
-      );
+      .where(eq(githubSubscriptions.channelId, channelId));
 
     return results.map(r => ({
       repo: r.repo,
@@ -616,7 +597,7 @@ export class SubscriptionService {
     deliveryMode?: "webhook" | "polling"
   ): Promise<
     Array<{
-      spaceId: string;
+      spaceId: string | null;
       channelId: string;
       eventTypes: EventType[];
       branchFilter: BranchFilter;
@@ -948,7 +929,7 @@ export class SubscriptionService {
    */
   private async requiresInstallationFailure(params: {
     townsUserId: string;
-    spaceId: string;
+    spaceId?: string;
     channelId: string;
     repoFullName: string;
     eventTypes: EventType[];
@@ -978,7 +959,7 @@ export class SubscriptionService {
    */
   private async storePendingSubscription(params: {
     townsUserId: string;
-    spaceId: string;
+    spaceId?: string;
     channelId: string;
     repoFullName: string;
     eventTypes: EventType[];
@@ -992,7 +973,7 @@ export class SubscriptionService {
       .insert(pendingSubscriptions)
       .values({
         townsUserId: params.townsUserId,
-        spaceId: params.spaceId,
+        spaceId: params.spaceId ?? null,
         channelId: params.channelId,
         repoFullName: params.repoFullName,
         eventTypes: params.eventTypes.join(","),
@@ -1013,7 +994,6 @@ export class SubscriptionService {
    */
   private async validateRepoAccessAndGetSubscription(
     townsUserId: string,
-    spaceId: string,
     channelId: string,
     repoFullName: string
   ): Promise<
@@ -1037,11 +1017,7 @@ export class SubscriptionService {
       };
     }
 
-    const subscription = await this.getSubscription(
-      spaceId,
-      channelId,
-      repoFullName
-    );
+    const subscription = await this.getSubscription(channelId, repoFullName);
     if (!subscription) {
       return { success: false, error: `Not subscribed to ${repoFullName}` };
     }

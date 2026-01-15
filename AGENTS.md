@@ -14,16 +14,44 @@ This file provides guidance to AI agents for building Towns Protocol bots.
 
 ## Base Payload
 
-All events include:
+All events use a discriminated union based on `isDm`:
 
 ```typescript
-{
-  userId: string; // Hex address (0x...)
-  spaceId: string;
-  channelId: string;
-  eventId: string; // Unique event ID (use as threadId/replyId when responding)
-  createdAt: Date;
-}
+type BasePayload =
+  | {
+      userId: string; // Hex address (0x...)
+      spaceId: null; // Always null for DM channels
+      channelId: string;
+      eventId: string; // Unique event ID (use as threadId/replyId when responding)
+      createdAt: Date;
+      event: StreamEvent;
+      isDm: true; // Discriminator: when true, spaceId is null
+    }
+  | {
+      userId: string; // Hex address (0x...)
+      spaceId: string; // Always a string for space channels
+      channelId: string;
+      eventId: string; // Unique event ID (use as threadId/replyId when responding)
+      createdAt: Date;
+      event: StreamEvent;
+      isDm: false; // Discriminator: when false, spaceId is string
+    };
+```
+
+**Type Safety:** TypeScript automatically narrows the type based on `isDm`. When `isDm` is `true`, `spaceId` is guaranteed to be `null`. When `isDm` is `false`, `spaceId` is guaranteed to be a `string`.
+
+**Example:**
+
+```typescript
+bot.onMessage(async (handler, event) => {
+  if (event.isDm) {
+    // TypeScript knows spaceId is null here
+    console.log("DM channel, no space");
+  } else {
+    // TypeScript knows spaceId is string here
+    console.log(`Space: ${event.spaceId}`);
+  }
+});
 ```
 
 ## Event Handlers
@@ -80,6 +108,14 @@ const bot = await makeTownsBot(privateData, jwtSecret, { commands });
 bot.onSlashCommand("help", async (handler, event) => {
   await handler.sendMessage(event.channelId, "Commands: /help");
 });
+```
+
+#### Paid Commands
+
+Add a `paid` property to your command definition with a price in USDC:
+
+```typescript
+{ name: "generate", description: "Generate AI content", paid: { price: '$0.20' } }
 ```
 
 ### onReaction
@@ -322,6 +358,8 @@ const hash = await execute(bot.viem, {
 
 ## External Interactions (Unprompted Messages)
 
+`bot.start()` returns a **Hono app**. To extend with additional routes, create a new Hono app and use `.route('/', app)` per https://hono.dev/docs/guides/best-practices#building-a-larger-application
+
 **All handler methods available on bot** (webhooks, timers, tasks):
 You need data prior (channelId, spaceId, etc):
 
@@ -330,20 +368,6 @@ bot.sendMessage(channelId, msg, opts?) | bot.editMessage(...) | bot.sendReaction
 bot.adminRemoveEvent(...) | bot.pinMessage(...) | bot.unpinMessage(...) | bot.createChannel(...) | bot.sendTip(...)
 bot.hasAdminPermission(...) | bot.checkPermission(...) | bot.ban(...) | bot.unban(...)
 // Properties: bot.botId, bot.viem, bot.appAddress
-```
-
-**GitHub Integration Pattern:**
-
-```typescript
-let channelId = null;
-bot.onSlashCommand("setup", async (h, e) => {
-  channelId = e.channelId;
-});
-app.post("/webhook", bot.start().jwtMiddleware, bot.start().handler);
-app.post("/github", async c => {
-  if (channelId) await bot.sendMessage(channelId, `PR: ${c.req.json().title}`);
-  return c.json({ ok: true });
-});
 ```
 
 **Patterns:** Store channel IDs | Webhooks/timers | Call bot.\* directly | Handle errors

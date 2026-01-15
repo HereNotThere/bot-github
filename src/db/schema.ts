@@ -50,7 +50,7 @@ export const oauthStates = pgTable(
     state: text("state").primaryKey(),
     townsUserId: text("towns_user_id").notNull(),
     channelId: text("channel_id").notNull(),
-    spaceId: text("space_id").notNull(),
+    spaceId: text("space_id"), // Nullable for DM channels
     redirectAction: text("redirect_action"), // 'subscribe' etc
     redirectData: text("redirect_data"), // JSON string with additional context
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -72,7 +72,7 @@ export const githubSubscriptions = pgTable(
   "github_subscriptions",
   {
     id: serial("id").primaryKey(),
-    spaceId: text("space_id").notNull(),
+    spaceId: text("space_id"), // Nullable for DM channels
     channelId: text("channel_id").notNull(),
     repoFullName: text("repo_full_name").notNull(), // Format: "owner/repo"
     deliveryMode: text("delivery_mode").notNull(), // 'webhook' or 'polling'
@@ -99,8 +99,8 @@ export const githubSubscriptions = pgTable(
       "delivery_mode_check",
       sql`${table.deliveryMode} IN ('webhook', 'polling')`
     ),
+    // channelId is globally unique in Towns, so spaceId not needed for uniqueness
     uniqueSubscription: uniqueIndex("github_subscriptions_unique_idx").on(
-      table.spaceId,
       table.channelId,
       table.repoFullName
     ),
@@ -209,7 +209,7 @@ export const pendingSubscriptions = pgTable(
       .references(() => githubUserTokens.townsUserId, {
         onDelete: "cascade",
       }),
-    spaceId: text("space_id").notNull(),
+    spaceId: text("space_id"), // Nullable for DM channels
     channelId: text("channel_id").notNull(),
     repoFullName: text("repo_full_name").notNull(),
     eventTypes: text("event_types").notNull(),
@@ -222,8 +222,8 @@ export const pendingSubscriptions = pgTable(
     ),
     userIndex: index("idx_pending_subscriptions_user").on(table.townsUserId),
     repoIndex: index("idx_pending_subscriptions_repo").on(table.repoFullName),
+    // channelId is globally unique in Towns, so spaceId not needed for uniqueness
     uniquePending: uniqueIndex("pending_subscriptions_unique_idx").on(
-      table.spaceId,
       table.channelId,
       table.repoFullName
     ),
@@ -237,8 +237,7 @@ export const pendingSubscriptions = pgTable(
 export const messageMappings = pgTable(
   "message_mappings",
   {
-    // Composite primary key columns
-    spaceId: text("space_id").notNull(),
+    spaceId: text("space_id"), // Nullable for DM channels
     channelId: text("channel_id").notNull(),
     repoFullName: text("repo_full_name").notNull(),
     githubEntityType: text("github_entity_type").notNull(), // 'pr' | 'issue' | 'comment' | 'review' | 'review_comment'
@@ -261,7 +260,6 @@ export const messageMappings = pgTable(
   table => ({
     pk: primaryKey({
       columns: [
-        table.spaceId,
         table.channelId,
         table.repoFullName,
         table.githubEntityType,

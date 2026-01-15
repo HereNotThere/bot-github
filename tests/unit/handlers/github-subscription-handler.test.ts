@@ -519,7 +519,6 @@ describe("github subscription handler", () => {
       expect(removeCalls.length).toBe(1);
       expect(removeCalls[0]).toEqual([
         "0x123",
-        "test-space",
         "test-channel",
         "owner/repo",
         ["pr", "issues"],
@@ -551,7 +550,7 @@ describe("github subscription handler", () => {
       );
 
       const removeCalls = mockSubscriptionService.removeEventTypes.mock.calls;
-      expect(removeCalls[0][3]).toBe("owner/repo");
+      expect(removeCalls[0][2]).toBe("owner/repo");
     });
 
     test("should handle unsubscribe failure", async () => {
@@ -602,7 +601,7 @@ describe("github subscription handler", () => {
 
       const removeCalls = mockSubscriptionService.removeEventTypes.mock.calls;
       expect(removeCalls.length).toBe(1);
-      expect(removeCalls[0][3]).toBe("owner/repo");
+      expect(removeCalls[0][2]).toBe("owner/repo");
     });
   });
 
@@ -786,7 +785,7 @@ describe("github subscription handler", () => {
 
       const updateCalls = mockSubscriptionService.updateSubscription.mock.calls;
       expect(updateCalls.length).toBe(1);
-      expect(updateCalls[0][5]).toBe("main,develop");
+      expect(updateCalls[0][4]).toBe("main,develop");
     });
   });
 });

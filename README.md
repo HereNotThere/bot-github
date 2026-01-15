@@ -161,15 +161,18 @@ All webhook events above except `workflow_run` (CI/CD) are also available via po
 
 3. **Start Postgres locally for development**
 
-   You can run Postgres in Docker with a single command:
+   Start the database with:
 
    ```bash
-   docker run --rm --name github-bot-db \
-     -e POSTGRES_USER=postgres \
-     -e POSTGRES_PASSWORD=postgres \
-     -e POSTGRES_DB=github-bot \
-     -p 5432:5432 \
-     postgres:18
+   bun db:up
+   ```
+
+   This creates a container with a named volume so your data persists across restarts.
+
+   To stop the database:
+
+   ```bash
+   bun db:down
    ```
 
    Then point your `.env` at the container:

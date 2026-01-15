@@ -20,7 +20,7 @@ export async function sendQueryOAuthPrompt(
   handler: BotHandler,
   userId: string,
   channelId: string,
-  spaceId: string,
+  spaceId: string | undefined,
   repo: string
 ): Promise<string | null> {
   return sendEditableOAuthPrompt(
@@ -61,7 +61,7 @@ export async function sendEditableOAuthPrompt(
   handler: BotHandler,
   userId: string,
   channelId: string,
-  spaceId: string,
+  spaceId: string | undefined,
   message: string,
   redirectAction: RedirectAction,
   redirectData: Omit<RedirectData, "messageEventId">
@@ -119,7 +119,7 @@ export async function handleInvalidOAuthToken(
   handler: BotHandler,
   userId: string,
   channelId: string,
-  spaceId: string,
+  spaceId: string | undefined,
   redirectAction: RedirectAction,
   redirectData: {
     repo: string;

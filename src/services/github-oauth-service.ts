@@ -28,7 +28,7 @@ import {
 export interface OAuthCallbackResult {
   townsUserId: string;
   channelId: string;
-  spaceId: string;
+  spaceId: string | undefined; // Undefined for DM channels
   redirectAction: RedirectAction | null;
   redirectData: RedirectData | null;
   githubLogin: string;
@@ -102,7 +102,7 @@ export class GitHubOAuthService {
    *
    * @param townsUserId - Towns user ID
    * @param channelId - Current channel ID
-   * @param spaceId - Current space ID
+   * @param spaceId - Current space ID (undefined for DM channels)
    * @param redirectAction - Action to perform after OAuth (e.g., 'subscribe')
    * @param redirectData - Additional data for redirect (e.g., repo name)
    * @returns Authorization URL to send to user
@@ -110,7 +110,7 @@ export class GitHubOAuthService {
   async getAuthorizationUrl(
     townsUserId: string,
     channelId: string,
-    spaceId: string,
+    spaceId: string | undefined,
     redirectAction?: RedirectAction,
     redirectData?: RedirectData
   ): Promise<string> {
@@ -123,7 +123,7 @@ export class GitHubOAuthService {
       state,
       townsUserId,
       channelId,
-      spaceId,
+      spaceId: spaceId ?? null, // Convert undefined to null for DB
       redirectAction: redirectAction || null,
       redirectData: redirectData ? JSON.stringify(redirectData) : null,
       expiresAt,
@@ -237,7 +237,7 @@ export class GitHubOAuthService {
     return {
       townsUserId: stateData.townsUserId,
       channelId: stateData.channelId,
-      spaceId: stateData.spaceId,
+      spaceId: stateData.spaceId ?? undefined, // Convert null to undefined
       redirectAction: actionResult.success ? actionResult.data : null,
       redirectData: dataResult?.success ? dataResult.data : null,
       githubLogin: user.login,

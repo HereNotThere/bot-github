@@ -64,6 +64,13 @@
       "when": 1765085291467,
       "tag": "0008_bouncy_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1768446708725,
+      "tag": "0009_nice_eddie_brock",
+      "breakpoints": true
     }
   ]
 }
